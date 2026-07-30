@@ -1,59 +1,109 @@
-import { NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { NextRequest, NextResponse } from "next/server";
+import { GoogleGenAI } from "@google/genai";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY!,
+});
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const { text } = await req.json();
 
     if (!text) {
-      return NextResponse.json({ error: "Nenhum texto fornecido." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Nenhum texto fornecido." },
+        { status: 400 }
+      );
     }
 
-    // Usando o modelo correto e estável
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
     const prompt = `
-      Analise o texto extraído de um PDF de exercícios abaixo e extraia as questões de forma estruturada.
-      Retorne APENAS um objeto JSON válido (sem blocos de código markdown adicionais se possível, ou apenas em JSON puro) no seguinte formato exato:
-      {
-        "questions": [
-          {
-            "statement": "Texto do enunciado da questão",
-            "options": [
-              { "letter": "A", "text": "Texto da alternativa A" },
-              { "letter": "B", "text": "Texto da alternativa B" },
-              { "letter": "C", "text": "Texto da alternativa C" },
-              { "letter": "D", "text": "Texto da alternativa D" },
-              { "letter": "E", "text": "Texto da alternativa E" }
-            ],
-            "correctOption": "A"
-          }
-        ]
-      }
-      Se a questão for dissertativa ou não tiver alternativas de múltipla escolha, crie alternativas simuladas baseadas na resposta ou deixe as alternativas em branco, mas mantenha o formato do JSON.
+Analise o texto abaixo, que foi extraído de um PDF de exercícios.
 
-      Texto para analisar:
-      ${text.slice(0, 15000)}
-    `;
+Extraia todas as questões encontradas.
 
-    const result = await model.generateContent(prompt);
-    const responseText = result.response.text();
+Retorne APENAS um JSON válido no seguinte formato:
 
-    // Limpa possíveis marcações de markdown da resposta do Gemini
-    const cleanedJsonText = responseText
+{
+  "questions": [
+    {
+      "statement": "Texto da questão",
+      "options": [
+        {
+          "letter": "A",
+          "text": "Alternativa A"
+        },
+        {
+          "letter": "B",
+          "text": "Alternativa B"
+        },
+        {
+          "letter": "C",
+          "text": "Alternativa C"
+        },
+        {
+          "letter": "D",
+          "text": "Alternativa D"
+        },
+        {
+          "letter": "E",
+          "text": "Alternativa E"
+        }
+      ],
+      "correctOption": "A"
+    }
+  ]
+}
+
+Regras:
+
+- Não escreva markdown.
+- Não use \`\`\`json.
+- Retorne somente o JSON.
+- Se a questão for dissertativa, deixe:
+  "options": []
+  "correctOption": ""
+
+Texto:
+
+${text.slice(0, 15000)}
+`;
+
+    const result = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+    });
+
+    const responseText = result.text ?? "";
+
+    const cleaned = responseText
       .replace(/```json/g, "")
       .replace(/```/g, "")
       .trim();
 
-    const data = JSON.parse(cleanedJsonText);
+    const match = cleaned.match(/\{[\s\S]*\}/);
+
+    if (!match) {
+      return NextResponse.json(
+        {
+          error: "A IA não retornou um JSON válido.",
+          raw: responseText,
+        },
+        { status: 500 }
+      );
+    }
+
+    const data = JSON.parse(match[0]);
 
     return NextResponse.json(data);
   } catch (error: any) {
-    console.error("Erro na API de extração:", error);
+    console.error(error);
+
     return NextResponse.json(
-      { error: `Erro ao processar com a inteligência artificial: ${error.message}` },
+      {
+        error:
+          error?.message ??
+          "Erro desconhecido ao processar o PDF.",
+      },
       { status: 500 }
     );
   }
