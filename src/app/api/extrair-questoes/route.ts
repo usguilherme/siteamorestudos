@@ -38,9 +38,11 @@ export async function POST(request: Request) {
     ${text}
     `;
 
-    // Utiliza o modelo gemini-2.5-flash para processamento rápido de texto e estruturação
+    // Utiliza o modelo gemini-3.5-flash: versão estável (GA) mais recente,
+    // já que gemini-2.5-flash está sendo descontinuado e gemini-1.5/2.0
+    // já foram desligados pelo Google
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
       contents: prompt,
     });
 
