@@ -4,7 +4,9 @@ import { useState } from "react";
 import Link from "next/link";
 import { QuestionOption } from "@/types";
 import { exportLocalStorageData, importLocalStorageData } from "@/lib/utils";
-import * as pdfjsLib from "pdfjs-dist";
+
+// Importa o pdfjs de forma segura para o browser usando o build legado/global
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
 
 // Configura o worker do PDF.js
 if (typeof window !== "undefined") {
