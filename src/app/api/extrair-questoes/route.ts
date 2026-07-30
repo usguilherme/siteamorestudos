@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenAI } from "@google/genai";
+import Groq from "groq-sdk";
 
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY!,
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY,
 });
 
 export async function POST(req: NextRequest) {
@@ -49,17 +49,18 @@ Retorne APENAS um JSON válido no seguinte formato:
           "text": "Alternativa E"
         }
       ],
-      "correctOption": "A"
+      "correctOption": ""
     }
   ]
 }
 
 Regras:
 
-- Não escreva markdown.
-- Não use \`\`\`json.
-- Retorne somente o JSON.
-- Se a questão for dissertativa, deixe:
+- Retorne APENAS JSON.
+- Não escreva explicações.
+- Não utilize markdown.
+- Não utilize \`\`\`.
+- Se uma questão não possuir alternativas, utilize:
   "options": []
   "correctOption": ""
 
@@ -68,12 +69,27 @@ Texto:
 ${text.slice(0, 15000)}
 `;
 
-    const result = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
+    const completion = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      temperature: 0,
+      response_format: {
+        type: "json_object",
+      },
+      messages: [
+        {
+          role: "system",
+          content:
+            "Você é um assistente especializado em extrair questões de provas e retornar apenas JSON válido.",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
     });
 
-    const responseText = result.text ?? "";
+    const responseText =
+      completion.choices[0]?.message?.content ?? "";
 
     const cleaned = responseText
       .replace(/```json/g, "")
@@ -96,7 +112,7 @@ ${text.slice(0, 15000)}
 
     return NextResponse.json(data);
   } catch (error: any) {
-    console.error(error);
+    console.error("Erro na API:", error);
 
     return NextResponse.json(
       {
