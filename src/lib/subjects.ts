@@ -1,4 +1,4 @@
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, getDocs, getDoc, doc, query, where } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Subject, Topic } from "@/types";
 
@@ -16,6 +16,20 @@ export async function getSubjects(): Promise<Subject[]> {
   }
 }
 
+export async function getSubjectById(id: string): Promise<Subject | null> {
+  try {
+    const docRef = doc(db, "subjects", id);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      return { id: docSnap.id, ...docSnap.data() } as Subject;
+    }
+    return null;
+  } catch (error) {
+    console.error("Erro ao buscar matéria por ID:", error);
+    return null;
+  }
+}
+
 export async function getTopicsBySubject(subjectId: string): Promise<Topic[]> {
   try {
     const q = query(collection(db, "topics"), where("subjectId", "==", subjectId));
@@ -28,5 +42,19 @@ export async function getTopicsBySubject(subjectId: string): Promise<Topic[]> {
   } catch (error) {
     console.error("Erro ao buscar tópicos:", error);
     return [];
+  }
+}
+
+export async function getTopicById(subjectId: string, topicId: string): Promise<Topic | null> {
+  try {
+    const docRef = doc(db, "topics", topicId);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      return { id: docSnap.id, ...docSnap.data() } as Topic;
+    }
+    return null;
+  } catch (error) {
+    console.error("Erro ao buscar tópico por ID:", error);
+    return null;
   }
 }
