@@ -5,14 +5,6 @@ import Link from "next/link";
 import { QuestionOption } from "@/types";
 import { exportLocalStorageData, importLocalStorageData } from "@/lib/utils";
 
-// Importa o pdfjs de forma segura para o browser usando o build legado/global
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
-
-// Configura o worker do PDF.js
-if (typeof window !== "undefined") {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
-}
-
 const ENEM_MATERIAS = [
   {
     id: "mat",
@@ -67,7 +59,7 @@ export default function NovaQuestaoPage() {
     setOptions(newOptions);
   };
 
-  // Função para ler o arquivo PDF enviado e extrair o texto
+  // Função para ler o arquivo PDF enviado e extrair o texto de forma segura para o browser
   const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -77,6 +69,13 @@ export default function NovaQuestaoPage() {
     setAiMsg("Lendo arquivo PDF...");
 
     try {
+      // Import dinâmico para evitar que o Node.js processe o canvas no SSR
+      const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.js");
+      
+      if (typeof window !== "undefined") {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+      }
+
       const arrayBuffer = await file.arrayBuffer();
       const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
       const pdfDoc = await loadingTask.promise;
