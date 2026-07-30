@@ -9,7 +9,7 @@ interface PageProps {
 export default async function DetalheAssuntoPage({ params }: PageProps) {
   const [subject, topic] = await Promise.all([
     getSubjectById(params.materia),
-    getTopicById(params.assunto),
+    getTopicById(params.materia, params.assunto),
   ]);
 
   if (!subject || !topic) notFound();
