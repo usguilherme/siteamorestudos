@@ -115,6 +115,82 @@ export function topicsFor(areaName: string): string[] {
   return getArea(areaName)?.topics ?? [];
 }
 
+export const ALL_TOPICS: string[] = ENEM_AREAS.flatMap((a) => a.topics);
+
 // Datas prováveis do ENEM 2026 (2º e 3º domingos de novembro — padrão das
 // últimas edições). Editável nos Ajustes quando sair o edital oficial.
 export const DEFAULT_ENEM_DATES = ["2026-11-08", "2026-11-15"];
+
+// Índice de incidência: estimativa de quantas das últimas ~10 provas cada
+// assunto apareceu com peso relevante (0 = raro, 10 = cai todo ano).
+// Baseado no padrão histórico do ENEM — é aproximação, não contagem oficial.
+export const INCIDENCE: Record<string, number> = {
+  // Matemática
+  "Aritmética e Operações Básicas": 9,
+  "Razão, Proporção e Regra de Três": 10,
+  "Porcentagem e Matemática Financeira": 10,
+  "Estatística (Média, Mediana, Moda e Desvio)": 9,
+  "Grandezas e Medidas": 8,
+  "Geometria Plana": 9,
+  "Geometria Espacial": 8,
+  "Geometria Analítica": 5,
+  "Funções (Afim, Quadrática, Exponencial e Logarítmica)": 9,
+  "Progressões (PA e PG)": 5,
+  "Trigonometria": 4,
+  "Análise Combinatória e Probabilidade": 8,
+  "Matrizes e Sistemas Lineares": 3,
+  // Linguagens
+  "Interpretação e Compreensão de Textos": 10,
+  "Funções da Linguagem": 7,
+  "Variação Linguística": 8,
+  "Figuras de Linguagem": 6,
+  "Gêneros Textuais e Tipologia": 7,
+  "Gramática e Norma-Padrão": 5,
+  "Literatura Brasileira": 7,
+  "Modernismo e Vanguardas Artísticas": 6,
+  "Artes, Música e Cultura": 6,
+  "Educação Física e Corpo": 6,
+  "Língua Estrangeira (Inglês/Espanhol)": 10,
+  "Tecnologias da Informação e Comunicação": 6,
+  // Humanas
+  "História do Brasil Colônia": 6,
+  "Brasil Império": 5,
+  "Brasil República (Velha, Vargas, Militar, Nova República)": 9,
+  "História Geral (Antiga, Medieval, Moderna)": 6,
+  "História Contemporânea (Guerras, Guerra Fria)": 7,
+  "Geografia Física e Cartografia": 8,
+  "Geografia Agrária e Urbana": 8,
+  "Geopolítica e Globalização": 8,
+  "Meio Ambiente e Questões Socioambientais": 9,
+  "Sociologia (Cidadania, Trabalho, Movimentos Sociais)": 9,
+  "Filosofia Antiga, Moderna e Contemporânea": 8,
+  "Formação Territorial e População do Brasil": 6,
+  // Natureza
+  "Mecânica (Cinemática e Dinâmica)": 9,
+  "Energia, Trabalho e Potência": 9,
+  "Termologia e Termodinâmica": 7,
+  "Óptica e Ondulatória": 7,
+  "Eletrodinâmica e Circuitos Elétricos": 9,
+  "Eletromagnetismo": 5,
+  "Química Geral e Atomística": 7,
+  "Estequiometria e Soluções": 8,
+  "Termoquímica, Cinética e Equilíbrio": 7,
+  "Eletroquímica": 6,
+  "Química Orgânica (Funções e Reações)": 9,
+  "Citologia e Biologia Celular": 7,
+  "Genética e Biotecnologia": 8,
+  "Ecologia e Impactos Ambientais": 10,
+  "Fisiologia Humana e Saúde": 8,
+  "Evolução e Origem da Vida": 6,
+};
+
+export function incidenceOf(topic: string): number {
+  return INCIDENCE[topic] ?? 5;
+}
+
+export function incidenceLabel(n: number): string {
+  if (n >= 9) return "cai quase todo ano";
+  if (n >= 7) return "cai com frequência";
+  if (n >= 4) return "cai às vezes";
+  return "cai raramente";
+}

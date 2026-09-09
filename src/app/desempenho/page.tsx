@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useHydrated, useSettings } from "@/lib/store";
-import { useStats } from "@/lib/stats";
+import { useScoreEstimate, useStats } from "@/lib/stats";
 import {
   AreaBarChart,
   ReasonPieChart,
@@ -22,6 +22,7 @@ import {
 export default function DesempenhoPage() {
   const hydrated = useHydrated();
   const stats = useStats();
+  const estimate = useScoreEstimate();
   const [settings] = useSettings();
 
   if (hydrated && stats.totalAttempts === 0) {
@@ -78,6 +79,34 @@ export default function DesempenhoPage() {
           tone="neutral"
         />
       </div>
+
+      {/* nota estimada */}
+      <Card className="p-5">
+        <div className="flex flex-wrap items-center gap-3">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-faint">
+              Nota estimada (objetivas)
+            </p>
+            <p className="mt-1 text-3xl font-extrabold text-primary">
+              {estimate.overall ?? "—"}
+              {estimate.overall !== null ? (
+                <span className="text-base font-semibold text-muted"> / 1000</span>
+              ) : null}
+            </p>
+          </div>
+          <div className="ml-auto flex flex-wrap gap-2">
+            {estimate.byArea
+              .filter((a) => a.score !== null)
+              .map((a) => (
+                <div key={a.name} className="rounded-lg bg-surface-2 px-3 py-1.5 text-center">
+                  <p className="text-[11px] text-faint">{a.short}</p>
+                  <p className="text-sm font-bold text-text">{a.score}</p>
+                </div>
+              ))}
+          </div>
+        </div>
+        <p className="mt-2 text-xs text-faint">{estimate.note}</p>
+      </Card>
 
       {/* meta */}
       <Card className="p-5">

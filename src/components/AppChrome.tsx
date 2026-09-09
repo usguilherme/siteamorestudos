@@ -11,9 +11,15 @@ import { cn } from "@/lib/cn";
 const NAV = [
   { href: "/", label: "Início", icon: "🏠" },
   { href: "/simulado", label: "Simulado", icon: "📝" },
-  { href: "/materias", label: "Matérias", icon: "📚" },
+  { href: "/redacao", label: "Redação", icon: "✍️" },
   { href: "/desempenho", label: "Desempenho", icon: "📊" },
   { href: "/revisar-erros", label: "Revisar erros", icon: "🔁" },
+  { href: "/diagnostico", label: "Prioridades", icon: "🎯" },
+];
+
+// só no menu mobile / secundário
+const NAV_EXTRA = [
+  { href: "/materias", label: "Matérias", icon: "📚" },
   { href: "/favoritas", label: "Favoritas", icon: "⭐" },
   { href: "/historico", label: "Histórico", icon: "🕘" },
 ];
@@ -152,7 +158,12 @@ export function Navbar() {
             className="fixed inset-0 z-40 bg-black/40"
           />
           <nav className="absolute inset-x-0 top-full z-50 max-h-[80dvh] overflow-y-auto border-b border-border bg-surface p-3 shadow-[var(--shadow)]">
-            {[...NAV, { href: "/admin/nova-questao", label: "Admin", icon: "🛠️" }, { href: "/ajustes", label: "Ajustes", icon: "⚙️" }].map(
+            {[
+              ...NAV,
+              ...NAV_EXTRA,
+              { href: "/admin/nova-questao", label: "Admin", icon: "🛠️" },
+              { href: "/ajustes", label: "Ajustes", icon: "⚙️" },
+            ].map(
               (item) => (
                 <Link
                   key={item.href}

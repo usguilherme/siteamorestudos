@@ -9,7 +9,12 @@ import {
   useHydrated,
 } from "@/lib/store";
 import { ENEM_AREAS, areaShort, topicsFor } from "@/lib/enem";
-import type { Question } from "@/types";
+import {
+  DIFFICULTIES,
+  DIFFICULTY_LABEL,
+  type Difficulty,
+  type Question,
+} from "@/types";
 import { cn } from "@/lib/cn";
 import {
   Badge,
@@ -111,6 +116,10 @@ export default function GerenciarQuestoesPage() {
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 {q.subject ? <Badge tone="primary">{areaShort(q.subject)}</Badge> : <Badge tone="bad">sem área</Badge>}
                 <span className="text-xs text-muted">{q.topic || "sem assunto"}</span>
+                {q.year ? <span className="text-xs text-faint">· {q.year}</span> : null}
+                {q.difficulty ? (
+                  <span className="text-xs text-faint">· {DIFFICULTY_LABEL[q.difficulty]}</span>
+                ) : null}
                 {favSet.has(q.id) ? <span className="text-xs text-warn">⭐</span> : null}
                 {q.correctOption ? null : <Badge tone="warn">sem gabarito</Badge>}
                 <div className="ml-auto flex gap-2">
@@ -166,6 +175,8 @@ function EditModal({ question, onClose }: { question: Question; onClose: () => v
       options: draft.options.map((o) => ({ ...o, text: o.text.trim() })),
       correctOption: draft.correctOption,
       explanation: draft.explanation?.trim() || undefined,
+      year: draft.year,
+      difficulty: draft.difficulty,
     });
     onClose();
   };
@@ -195,6 +206,37 @@ function EditModal({ question, onClose }: { question: Question; onClose: () => v
               >
                 <option value="">Selecione…</option>
                 {topics.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </Field>
+            <Field label="Ano">
+              <input
+                type="number"
+                min={2009}
+                max={2100}
+                className={inputClass}
+                value={draft.year ?? ""}
+                onChange={(e) =>
+                  setDraft({ ...draft, year: e.target.value ? Number(e.target.value) : undefined })
+                }
+              />
+            </Field>
+            <Field label="Dificuldade">
+              <select
+                className={selectClass}
+                value={draft.difficulty ?? ""}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    difficulty: (e.target.value || undefined) as Difficulty | undefined,
+                  })
+                }
+              >
+                <option value="">—</option>
+                {DIFFICULTIES.map((d) => (
+                  <option key={d} value={d}>
+                    {DIFFICULTY_LABEL[d]}
+                  </option>
+                ))}
               </select>
             </Field>
           </div>

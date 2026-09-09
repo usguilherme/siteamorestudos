@@ -1,9 +1,9 @@
 "use client";
 
 import { useMemo } from "react";
-import { ENEM_AREAS } from "@/lib/enem";
+import { ALL_TOPICS, ENEM_AREAS, incidenceOf } from "@/lib/enem";
 import { useAppData } from "@/lib/store";
-import type { Attempt, Question } from "@/types";
+import type { Attempt, Difficulty, Question } from "@/types";
 
 export function dateKey(d: Date | string): string {
   const date = typeof d === "string" ? new Date(d) : d;
@@ -259,4 +259,129 @@ export function useReviewQueue(): ReviewItem[] {
     () => computeReviewQueue(questions, attempts, reviewedAt),
     [questions, attempts, reviewedAt],
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* Nota estimada (heurística inspirada na TRI — NÃO é a TRI oficial)   */
+/* ------------------------------------------------------------------ */
+
+const DIFF_WEIGHT: Record<Difficulty, number> = {
+  facil: 0.6,
+  media: 1,
+  dificil: 1.6,
+};
+
+export interface ScoreEstimate {
+  overall: number | null;
+  byArea: { name: string; short: string; score: number | null; count: number }[];
+  note: string;
+}
+
+function areaScore(attempts: Attempt[]): number | null {
+  if (!attempts.length) return null;
+  let num = 0;
+  let den = 0;
+  for (const a of attempts) {
+    const w = DIFF_WEIGHT[a.difficulty ?? "media"];
+    den += w;
+    if (a.isCorrect) num += w;
+  }
+  const wacc = den ? num / den : 0;
+  let score = 300 + wacc * 700; // faixa aproximada da TRI: ~300 (chão) a 1000
+
+  // Incoerência (acertar difícil e errar fácil) puxa a nota pra baixo,
+  // como a TRI faz ao desconfiar de acertos "sorte/chute".
+  const easyWrong = attempts.filter((a) => a.difficulty === "facil" && !a.isCorrect).length;
+  const hardRight = attempts.filter((a) => a.difficulty === "dificil" && a.isCorrect).length;
+  if (easyWrong > 0 && hardRight > 0) {
+    score -= Math.min(140, 45 * Math.min(easyWrong, hardRight));
+  }
+  return Math.round(Math.max(0, Math.min(1000, score)));
+}
+
+export function computeScoreEstimate(attempts: Attempt[]): ScoreEstimate {
+  const byArea = ENEM_AREAS.map((area) => {
+    const list = attempts.filter((a) => a.subject === area.name);
+    return {
+      name: area.name,
+      short: area.short,
+      score: areaScore(list),
+      count: list.length,
+    };
+  });
+  const withData = byArea.filter((a) => a.score !== null && a.count >= 5);
+  const overall = withData.length
+    ? Math.round(withData.reduce((s, a) => s + (a.score ?? 0), 0) / withData.length)
+    : null;
+
+  const note =
+    attempts.length < 20
+      ? "Estimativa grosseira — responda mais questões (com dificuldade marcada) pra ela ficar confiável."
+      : "Estimativa heurística ponderada por dificuldade. A nota real do ENEM usa a TRI oficial e pode variar.";
+
+  return { overall, byArea, note };
+}
+
+export function useScoreEstimate(): ScoreEstimate {
+  const { attempts } = useAppData();
+  return useMemo(() => computeScoreEstimate(attempts), [attempts]);
+}
+
+/* ------------------------------------------------------------------ */
+/* Priorização por custo-benefício (incidência x desempenho dela)      */
+/* ------------------------------------------------------------------ */
+
+export interface Priority {
+  topic: string;
+  subject: string;
+  incidence: number;
+  attempts: number;
+  accuracy: number | null; // null = nunca praticou
+  score: number; // quanto maior, mais vale priorizar
+  reason: string;
+}
+
+export function computePriorities(attempts: Attempt[]): Priority[] {
+  const byTopic = new Map<string, { total: number; correct: number; subject: string }>();
+  for (const a of attempts) {
+    if (!a.topic) continue;
+    const cur = byTopic.get(a.topic) ?? { total: 0, correct: 0, subject: a.subject };
+    cur.total++;
+    if (a.isCorrect) cur.correct++;
+    byTopic.set(a.topic, cur);
+  }
+
+  const out: Priority[] = ALL_TOPICS.map((topic) => {
+    const area = ENEM_AREAS.find((ar) => ar.topics.includes(topic));
+    const data = byTopic.get(topic);
+    const incidence = incidenceOf(topic);
+    const acc = data && data.total >= 3 ? data.correct / data.total : null;
+
+    // gap: o quanto ela ainda tem a ganhar nesse assunto (0..1)
+    const gap = acc === null ? 0.8 : 1 - acc;
+    const score = incidence * gap;
+
+    let reason: string;
+    if (acc === null) reason = "cai muito e você quase não treinou";
+    else if (acc < 0.5) reason = "cai muito e seu acerto está baixo";
+    else if (acc < 0.7) reason = "cai bastante e dá pra melhorar";
+    else reason = "você já vai bem aqui";
+
+    return {
+      topic,
+      subject: area?.name ?? "",
+      incidence,
+      attempts: data?.total ?? 0,
+      accuracy: acc === null ? null : Math.round(acc * 100),
+      score: Math.round(score * 10) / 10,
+      reason,
+    };
+  });
+
+  return out.sort((a, b) => b.score - a.score);
+}
+
+export function usePriorities(): Priority[] {
+  const { attempts } = useAppData();
+  return useMemo(() => computePriorities(attempts), [attempts]);
 }

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { addQuestion, addQuestions } from "@/lib/store";
 import { ENEM_AREAS, topicsFor } from "@/lib/enem";
-import type { QuestionOption } from "@/types";
+import { DIFFICULTIES, DIFFICULTY_LABEL, type Difficulty, type QuestionOption } from "@/types";
 import {
   Badge,
   Button,
@@ -32,6 +32,8 @@ export default function NovaQuestaoPage() {
   const [options, setOptions] = useState<QuestionOption[]>(EMPTY_OPTS);
   const [correct, setCorrect] = useState("A");
   const [explanation, setExplanation] = useState("");
+  const [year, setYear] = useState("");
+  const [difficulty, setDifficulty] = useState<Difficulty | "">("");
   const [msg, setMsg] = useState<Msg>(null);
 
   // pdf + ia
@@ -52,6 +54,7 @@ export default function NovaQuestaoPage() {
       setMsg({ kind: "err", text: "Preencha todas as 5 alternativas." });
       return;
     }
+    const y = Number(year);
     addQuestion({
       subject: area,
       topic,
@@ -59,6 +62,8 @@ export default function NovaQuestaoPage() {
       options: options.map((o) => ({ ...o, text: o.text.trim() })),
       correctOption: correct,
       explanation: explanation.trim() || undefined,
+      year: Number.isFinite(y) && y > 2000 ? y : undefined,
+      difficulty: difficulty || undefined,
     });
     setMsg({ kind: "ok", text: "✅ Questão salva!" });
     setStatement("");
@@ -125,6 +130,9 @@ export default function NovaQuestaoPage() {
           options?: Array<{ letter?: string; text?: string }>;
           correctOption?: string;
           explanation?: string;
+          optionComments?: Record<string, string>;
+          year?: number;
+          difficulty?: string;
           possiblyHasImage?: boolean;
         }>;
       } = await res.json();
@@ -133,6 +141,15 @@ export default function NovaQuestaoPage() {
         (q) => q.statement && Array.isArray(q.options) && q.options.length >= 2,
       );
       if (!list.length) throw new Error("A IA não encontrou questões estruturáveis nesse texto.");
+
+      const cleanComments = (raw: Record<string, string> | undefined) => {
+        if (!raw) return undefined;
+        const out: Record<string, string> = {};
+        for (const [k, v] of Object.entries(raw)) {
+          if (typeof v === "string" && v.trim()) out[k.toUpperCase().slice(0, 1)] = v.trim();
+        }
+        return Object.keys(out).length ? out : undefined;
+      };
 
       addQuestions(
         list.map((q) => ({
@@ -145,6 +162,12 @@ export default function NovaQuestaoPage() {
           })),
           correctOption: String(q.correctOption || "").toUpperCase().slice(0, 1),
           explanation: q.explanation ? String(q.explanation).trim() : undefined,
+          optionComments: cleanComments(q.optionComments),
+          year:
+            Number(q.year) > 2000 && Number(q.year) < 2100 ? Number(q.year) : undefined,
+          difficulty: DIFFICULTIES.includes(q.difficulty as Difficulty)
+            ? (q.difficulty as Difficulty)
+            : undefined,
           possiblyHasImage: !!q.possiblyHasImage,
           source: pdfName || undefined,
         })),
@@ -240,6 +263,31 @@ export default function NovaQuestaoPage() {
               <select className={selectClass} value={topic} onChange={(e) => setTopic(e.target.value)} required disabled={!area}>
                 <option value="">Selecione…</option>
                 {topics.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </Field>
+            <Field label="Ano da prova (opcional)">
+              <input
+                type="number"
+                min={2009}
+                max={2100}
+                className={inputClass}
+                value={year}
+                onChange={(e) => setYear(e.target.value)}
+                placeholder="Ex: 2022"
+              />
+            </Field>
+            <Field label="Dificuldade (opcional)">
+              <select
+                className={selectClass}
+                value={difficulty}
+                onChange={(e) => setDifficulty(e.target.value as Difficulty | "")}
+              >
+                <option value="">—</option>
+                {DIFFICULTIES.map((d) => (
+                  <option key={d} value={d}>
+                    {DIFFICULTY_LABEL[d]}
+                  </option>
+                ))}
               </select>
             </Field>
           </div>

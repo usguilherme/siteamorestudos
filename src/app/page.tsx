@@ -17,13 +17,25 @@ const FEATURES = [
     href: "/simulado",
     icon: "📝",
     title: "Simulado",
-    desc: "Questões cronometradas por matéria, com modo treino ou prova.",
+    desc: "Treino, prova ou o formato real: 90 questões e 5h30 de cronômetro.",
+  },
+  {
+    href: "/redacao",
+    icon: "✍️",
+    title: "Redação",
+    desc: "Escreva e receba correção pelas 5 competências, com temas e repertório.",
+  },
+  {
+    href: "/diagnostico",
+    icon: "🎯",
+    title: "Prioridades",
+    desc: "O que rende mais ponto: alta incidência no ENEM + seu ponto fraco.",
   },
   {
     href: "/desempenho",
     icon: "📊",
     title: "Desempenho",
-    desc: "Gráficos de evolução, pontos fortes e o que revisar primeiro.",
+    desc: "Gráficos de evolução, nota estimada e pontos fortes e fracos.",
   },
   {
     href: "/revisar-erros",
@@ -32,22 +44,10 @@ const FEATURES = [
     desc: "Fila de revisão espaçada com o que você errou e ainda não recuperou.",
   },
   {
-    href: "/favoritas",
-    icon: "⭐",
-    title: "Favoritas",
-    desc: "Seu caderno de questões marcadas pra revisar antes da prova.",
-  },
-  {
     href: "/materias",
     icon: "📚",
     title: "Matérias",
-    desc: "Banco de questões organizado por área e assunto do ENEM.",
-  },
-  {
-    href: "/historico",
-    icon: "🕘",
-    title: "Histórico",
-    desc: "Tudo que você já respondeu, com filtros e busca.",
+    desc: "Banco de questões por área, assunto, ano e dificuldade.",
   },
 ];
 

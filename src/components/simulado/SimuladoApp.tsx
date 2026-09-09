@@ -10,14 +10,18 @@ import {
   toggleFavorite,
   useAppData,
 } from "@/lib/store";
-import { ENEM_AREAS, areaShort, topicsFor } from "@/lib/enem";
+import { ENEM_AREAS, areaShort, getArea, topicsFor } from "@/lib/enem";
 import {
+  DIFFICULTIES,
+  DIFFICULTY_LABEL,
   ERROR_REASONS,
+  type Difficulty,
   type ErrorReason,
   type Question,
   type QuestionSource,
   type SimuladoMode,
 } from "@/types";
+import { computeScoreEstimate } from "@/lib/stats";
 import { messages } from "@/lib/messages";
 import { formatTime } from "@/lib/utils";
 import { shuffle } from "@/lib/shuffle";
@@ -43,6 +47,11 @@ const SOURCE_LABELS: Record<QuestionSource, string> = {
 };
 
 const LETTERS = ["A", "B", "C", "D", "E"];
+
+// Prova real: 90 questões, 5h30 de cronômetro (1º dia do ENEM).
+const PROVA_REAL_COUNT = 90;
+const PROVA_REAL_SECONDS = 5 * 3600 + 30 * 60;
+const AREA_ORDER = ["linguagens", "humanas", "natureza", "matematica"];
 
 function usable(q: Question) {
   return q.options.length >= 2 && !!q.correctOption;
@@ -80,6 +89,16 @@ export function SimuladoApp() {
   const [source, setSource] = useState<QuestionSource>(
     (params.get("source") as QuestionSource) || "todas",
   );
+  const [yearFilter, setYearFilter] = useState("");
+  const [diffFilter, setDiffFilter] = useState<Difficulty | "">("");
+
+  const availableYears = useMemo(
+    () =>
+      [...new Set(questions.map((q) => q.year).filter((y): y is number => !!y))].sort(
+        (a, b) => b - a,
+      ),
+    [questions],
+  );
 
   // sessão
   const [pool, setPool] = useState<Question[]>([]);
@@ -95,15 +114,27 @@ export function SimuladoApp() {
 
   const buildPool = useCallback((): Question[] => {
     let list = questions.filter(usable);
+
+    if (mode === "prova-real") {
+      list = shuffle(list).slice(0, PROVA_REAL_COUNT);
+      const rank = (q: Question) => {
+        const i = AREA_ORDER.indexOf(getArea(q.subject)?.id ?? "");
+        return i < 0 ? 99 : i;
+      };
+      return [...list].sort((a, b) => rank(a) - rank(b));
+    }
+
     if (area !== "TODAS") list = list.filter((q) => q.subject === area);
     if (topic !== "TODOS") list = list.filter((q) => q.topic === topic);
+    if (yearFilter) list = list.filter((q) => String(q.year) === yearFilter);
+    if (diffFilter) list = list.filter((q) => q.difficulty === diffFilter);
     if (source === "erradas") list = list.filter((q) => wrongIds.has(q.id));
     if (source === "nao-vistas") list = list.filter((q) => !seenIds.has(q.id));
     if (source === "favoritas") list = list.filter((q) => favSet.has(q.id));
     if (shuffleQ) list = shuffle(list);
     else list = [...list].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     return list.slice(0, Math.max(1, count));
-  }, [questions, area, topic, source, shuffleQ, count, wrongIds, seenIds, favSet]);
+  }, [questions, mode, area, topic, yearFilter, diffFilter, source, shuffleQ, count, wrongIds, seenIds, favSet]);
 
   const preview = useMemo(() => buildPool().length, [buildPool]);
   const totalUsable = useMemo(
@@ -144,6 +175,8 @@ export function SimuladoApp() {
   const current = pool[idx];
   const answered = current ? answers[current.id] !== undefined : false;
   const lockedTreino = runMode === "treino" && answered;
+  const isExam = runMode !== "treino";
+  const isProvaReal = runMode === "prova-real";
 
   // cronômetro por questão
   useEffect(() => {
@@ -160,6 +193,7 @@ export function SimuladoApp() {
     () => Object.values(elapsed).reduce((s, n) => s + n, 0),
     [elapsed],
   );
+  const remaining = PROVA_REAL_SECONDS - totalElapsed;
 
   const answer = useCallback(
     (letter: string) => {
@@ -196,23 +230,43 @@ export function SimuladoApp() {
         userAnswer: letter,
         correctAnswer: q.correctOption,
         reason: reasons[q.id] ?? null,
+        difficulty: q.difficulty,
         timeSpent: elapsed[q.id] ?? 0,
         mode: runMode,
       });
       if (source === "erradas" || source === "favoritas") markReviewed(q.id);
     }
+
+    const sessionAttempts = pool
+      .filter((q) => answers[q.id] !== undefined)
+      .map((q) => ({
+        subject: q.subject,
+        isCorrect: answers[q.id] === q.correctOption,
+        difficulty: q.difficulty,
+      }));
+    const est = computeScoreEstimate(sessionAttempts as never);
+
     saveSession({
       mode: runMode,
-      subject: area,
-      topic,
+      subject: runMode === "prova-real" ? "TODAS" : area,
+      topic: runMode === "prova-real" ? "TODOS" : topic,
       questionSource: source,
       total: answeredCount,
       correct,
       timeSpent: totalElapsed,
+      estimatedScore: est.overall ?? undefined,
     });
     setPhase("done");
     window.scrollTo({ top: 0 });
   }, [pool, answers, reasons, elapsed, runMode, area, topic, source, totalElapsed]);
+
+  // Prova real: acabou o tempo → encerra automaticamente.
+  useEffect(() => {
+    if (phase === "running" && isProvaReal && remaining <= 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      finish();
+    }
+  }, [phase, isProvaReal, remaining, finish]);
 
   // atalhos de teclado
   useEffect(() => {
@@ -226,7 +280,7 @@ export function SimuladoApp() {
         answer(current.options[letterIdx].letter);
       } else if (k === "n" || k === "arrowright" || k === "enter") {
         if (idx < pool.length - 1) goto(idx + 1);
-        else if (runMode === "prova") finish();
+        else if (runMode !== "treino") finish();
         else if (answered) finish();
       } else if (k === "p" || k === "arrowleft") {
         goto(idx - 1);
@@ -260,7 +314,49 @@ export function SimuladoApp() {
           />
         ) : (
           <Card className="space-y-5 p-5 sm:p-6">
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <p className="mb-2 text-xs font-semibold text-muted">Modo</p>
+              <div className="grid gap-2 sm:grid-cols-3">
+                {(
+                  [
+                    ["treino", "Treino", "Vê a resposta na hora"],
+                    ["prova", "Prova", "Resultado só no fim"],
+                    ["prova-real", "Prova real", "90 questões · 5h30"],
+                  ] as const
+                ).map(([v, title, desc]) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setMode(v)}
+                    className={cn(
+                      "rounded-xl border p-3 text-left transition",
+                      mode === v
+                        ? "border-primary bg-primary-soft"
+                        : "border-border-strong bg-surface hover:bg-surface-2",
+                    )}
+                  >
+                    <p className="text-sm font-bold text-text">{title}</p>
+                    <p className="text-xs text-muted">{desc}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {mode === "prova-real" ? (
+              <div className="rounded-xl border border-primary/30 bg-primary-soft/50 p-4 text-sm text-muted">
+                Simulado no formato do 1º dia: <strong className="text-text">90 questões</strong> de
+                todas as áreas na ordem oficial, cronômetro regressivo de{" "}
+                <strong className="text-text">5h30</strong>, gabarito só no fim. Treinar
+                resistência é metade da prova.
+                {totalUsable < PROVA_REAL_COUNT ? (
+                  <p className="mt-2 text-warn">
+                    Você tem {totalUsable} questões — a prova real vai usar todas elas.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className={cn("grid gap-4 sm:grid-cols-2", mode === "prova-real" && "hidden")}>
               <Field label="Área">
                 <select
                   className={selectClass}
@@ -322,57 +418,66 @@ export function SimuladoApp() {
                   ))}
                 </select>
               </Field>
-            </div>
 
-            <div>
-              <p className="mb-2 text-xs font-semibold text-muted">Modo</p>
-              <div className="grid grid-cols-2 gap-2">
-                {(
-                  [
-                    ["treino", "Treino", "Vê a resposta na hora"],
-                    ["prova", "Prova", "Resultado só no fim"],
-                  ] as const
-                ).map(([v, title, desc]) => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() => setMode(v)}
-                    className={cn(
-                      "rounded-xl border p-3 text-left transition",
-                      mode === v
-                        ? "border-primary bg-primary-soft"
-                        : "border-border-strong bg-surface hover:bg-surface-2",
-                    )}
+              {availableYears.length > 0 ? (
+                <Field label="Ano">
+                  <select
+                    className={selectClass}
+                    value={yearFilter}
+                    onChange={(e) => setYearFilter(e.target.value)}
                   >
-                    <p className="text-sm font-bold text-text">{title}</p>
-                    <p className="text-xs text-muted">{desc}</p>
-                  </button>
-                ))}
-              </div>
+                    <option value="">Qualquer ano</option>
+                    {availableYears.map((y) => (
+                      <option key={y} value={String(y)}>
+                        {y}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              ) : null}
+
+              <Field label="Dificuldade">
+                <select
+                  className={selectClass}
+                  value={diffFilter}
+                  onChange={(e) => setDiffFilter(e.target.value as Difficulty | "")}
+                >
+                  <option value="">Qualquer nível</option>
+                  {DIFFICULTIES.map((d) => (
+                    <option key={d} value={d}>
+                      {DIFFICULTY_LABEL[d]}
+                    </option>
+                  ))}
+                </select>
+              </Field>
             </div>
 
-            <label className="flex items-center gap-3 text-sm">
-              <input
-                type="checkbox"
-                checked={shuffleQ}
-                onChange={(e) => setShuffleQ(e.target.checked)}
-                className="h-4 w-4 accent-[var(--primary)]"
-              />
-              <span className="font-medium text-text">Embaralhar a ordem das questões</span>
-            </label>
+            {mode !== "prova-real" ? (
+              <label className="flex items-center gap-3 text-sm">
+                <input
+                  type="checkbox"
+                  checked={shuffleQ}
+                  onChange={(e) => setShuffleQ(e.target.checked)}
+                  className="h-4 w-4 accent-[var(--primary)]"
+                />
+                <span className="font-medium text-text">Embaralhar a ordem das questões</span>
+              </label>
+            ) : null}
 
             <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-muted">
                 {preview > 0 ? (
                   <>
-                    <span className="font-bold text-text">{preview}</span> questão(ões) nesse filtro
+                    <span className="font-bold text-text">{preview}</span> questão(ões)
                   </>
                 ) : (
                   "Nenhuma questão com esse filtro."
                 )}
               </p>
               <Button size="lg" disabled={preview === 0} onClick={() => start()}>
-                Começar {mode === "prova" ? "prova" : "treino"} 🚀
+                {mode === "prova-real"
+                  ? "Iniciar prova real 🕐"
+                  : `Começar ${mode === "prova" ? "prova" : "treino"} 🚀`}
               </Button>
             </div>
           </Card>
@@ -395,6 +500,14 @@ export function SimuladoApp() {
       if (answers[q.id] === q.correctOption) cur.correct++;
       byTopic.set(q.topic, cur);
     }
+
+    const est = computeScoreEstimate(
+      done.map((q) => ({
+        subject: q.subject,
+        isCorrect: answers[q.id] === q.correctOption,
+        difficulty: q.difficulty,
+      })) as never,
+    );
 
     return (
       <div className="mx-auto max-w-2xl space-y-5 px-4 py-8 sm:px-6">
@@ -421,6 +534,14 @@ export function SimuladoApp() {
               <p className="mt-1 text-2xl font-extrabold text-text">{formatTime(totalElapsed)}</p>
             </div>
           </div>
+
+          {est.overall !== null ? (
+            <p className="mt-4 text-sm text-muted">
+              Nota estimada nesta sessão:{" "}
+              <strong className="text-text">{est.overall}</strong>{" "}
+              <span className="text-faint">(heurística por dificuldade — não é a TRI oficial)</span>
+            </p>
+          ) : null}
         </Card>
 
         {byTopic.size > 0 ? (
@@ -478,15 +599,22 @@ export function SimuladoApp() {
                 <p className="text-sm text-text">{q.statement}</p>
                 <div className="mt-2 space-y-1 text-sm">
                   {q.options.map((o) => (
-                    <div
-                      key={o.letter}
-                      className={cn(
-                        "rounded-lg px-2 py-1",
-                        o.letter === q.correctOption && "bg-[var(--ok-soft)] font-semibold text-ok",
-                        o.letter === picked && !ok && "bg-[var(--bad-soft)] text-bad line-through",
-                      )}
-                    >
-                      <span className="font-bold">{o.letter})</span> {o.text}
+                    <div key={o.letter}>
+                      <div
+                        className={cn(
+                          "rounded-lg px-2 py-1",
+                          o.letter === q.correctOption && "bg-[var(--ok-soft)] font-semibold text-ok",
+                          o.letter === picked && !ok && "bg-[var(--bad-soft)] text-bad line-through",
+                        )}
+                      >
+                        <span className="font-bold">{o.letter})</span> {o.text}
+                      </div>
+                      {q.optionComments?.[o.letter] ? (
+                        <p className="px-2 pt-0.5 text-xs text-muted">
+                          {o.letter === q.correctOption ? "✓ " : "✗ "}
+                          {q.optionComments[o.letter]}
+                        </p>
+                      ) : null}
                     </div>
                   ))}
                 </div>
@@ -519,7 +647,18 @@ export function SimuladoApp() {
           </span>
           <span className="flex items-center gap-3">
             <span className="tabular-nums">⏱️ {formatTime(elapsed[current.id] ?? 0)}</span>
-            <span className="tabular-nums text-faint">Σ {formatTime(totalElapsed)}</span>
+            {isProvaReal ? (
+              <span
+                className={cn(
+                  "tabular-nums font-bold",
+                  remaining < 600 ? "text-bad" : "text-primary",
+                )}
+              >
+                ⏳ {formatTime(Math.max(0, remaining))}
+              </span>
+            ) : (
+              <span className="tabular-nums text-faint">Σ {formatTime(totalElapsed)}</span>
+            )}
           </span>
         </div>
         <ProgressBar value={progress} />
@@ -528,6 +667,20 @@ export function SimuladoApp() {
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Badge tone="primary">{areaShort(current.subject)}</Badge>
         <Badge>{current.topic}</Badge>
+        {current.year ? <Badge tone="neutral">{current.year}</Badge> : null}
+        {current.difficulty && runMode === "treino" && answered ? (
+          <Badge
+            tone={
+              current.difficulty === "facil"
+                ? "ok"
+                : current.difficulty === "dificil"
+                  ? "bad"
+                  : "warn"
+            }
+          >
+            {DIFFICULTY_LABEL[current.difficulty]}
+          </Badge>
+        ) : null}
         <button
           onClick={() => toggleFavorite(current.id)}
           className={cn(
@@ -575,31 +728,45 @@ export function SimuladoApp() {
         <div className="space-y-2.5">
           {current.options.map((o) => {
             const picked = answers[current.id] === o.letter;
+            const showFeedback = runMode === "treino" && answered;
             let tone = "border-border-strong bg-surface hover:border-primary/50";
-            if (runMode === "treino" && answered) {
+            if (showFeedback) {
               if (o.letter === current.correctOption)
                 tone = "border-ok bg-[var(--ok-soft)] text-ok font-semibold";
               else if (picked) tone = "border-bad bg-[var(--bad-soft)] text-bad";
-              else tone = "border-border bg-surface opacity-50";
+              else tone = "border-border bg-surface opacity-60";
             } else if (picked) {
               tone = "border-primary bg-primary-soft text-primary font-semibold";
             }
+            const comment = current.optionComments?.[o.letter];
             return (
-              <button
-                key={o.letter}
-                onClick={() => answer(o.letter)}
-                disabled={lockedTreino}
-                aria-pressed={picked}
-                className={cn(
-                  "flex w-full items-start gap-3 rounded-xl border p-3.5 text-left text-sm transition sm:text-base",
-                  tone,
-                )}
-              >
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-sm font-bold">
-                  {o.letter}
-                </span>
-                <span className="pt-0.5">{o.text}</span>
-              </button>
+              <div key={o.letter}>
+                <button
+                  onClick={() => answer(o.letter)}
+                  disabled={lockedTreino}
+                  aria-pressed={picked}
+                  className={cn(
+                    "flex w-full items-start gap-3 rounded-xl border p-3.5 text-left text-sm transition sm:text-base",
+                    tone,
+                  )}
+                >
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-sm font-bold">
+                    {o.letter}
+                  </span>
+                  <span className="pt-0.5">{o.text}</span>
+                </button>
+                {showFeedback && comment ? (
+                  <p
+                    className={cn(
+                      "ml-10 mt-1 text-xs",
+                      o.letter === current.correctOption ? "text-ok" : "text-muted",
+                    )}
+                  >
+                    {o.letter === current.correctOption ? "✓ " : "✗ "}
+                    {comment}
+                  </p>
+                ) : null}
+              </div>
             );
           })}
         </div>
@@ -669,9 +836,9 @@ export function SimuladoApp() {
         )}
       </div>
 
-      {runMode === "prova" ? (
+      {isExam ? (
         <p className="mt-4 text-center text-xs text-faint">
-          Modo prova: você pode voltar e mudar respostas até finalizar.
+          Modo prova: sem gabarito até o fim, mas dá pra voltar e mudar respostas.
         </p>
       ) : null}
 

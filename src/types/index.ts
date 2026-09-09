@@ -6,6 +6,16 @@ export interface QuestionOption {
   text: string;
 }
 
+export type Difficulty = "facil" | "media" | "dificil";
+
+export const DIFFICULTIES: Difficulty[] = ["facil", "media", "dificil"];
+
+export const DIFFICULTY_LABEL: Record<Difficulty, string> = {
+  facil: "Fácil",
+  media: "Média",
+  dificil: "Difícil",
+};
+
 export interface Question {
   id: string;
   subject: string; // nome completo da área do ENEM
@@ -13,14 +23,18 @@ export interface Question {
   statement: string;
   options: QuestionOption[];
   correctOption: string; // letra do gabarito ("" se desconhecido)
-  explanation?: string;
+  explanation?: string; // comentário da alternativa correta
+  optionComments?: Record<string, string>; // letra -> por que erra/acerta
+  year?: number;
+  difficulty?: Difficulty;
+  skill?: string; // habilidade da Matriz de Referência do INEP (ex: "H12")
   imageUrl?: string;
   possiblyHasImage?: boolean;
   source?: string; // ex: nome do PDF de origem
   createdAt: string; // ISO
 }
 
-export type SimuladoMode = "treino" | "prova";
+export type SimuladoMode = "treino" | "prova" | "prova-real";
 
 export type QuestionSource =
   | "todas"
@@ -48,6 +62,7 @@ export interface Attempt {
   userAnswer: string;
   correctAnswer: string;
   reason?: ErrorReason | null;
+  difficulty?: Difficulty;
   timeSpent: number; // segundos nesta questão
   mode: SimuladoMode;
   createdAt: string; // ISO
@@ -62,7 +77,35 @@ export interface Session {
   total: number;
   correct: number;
   timeSpent: number; // segundos totais
+  estimatedScore?: number; // 0-1000 (heurística ponderada por dificuldade)
   createdAt: string; // ISO
+}
+
+export interface CompetenciaScore {
+  nota: number; // 0-200
+  comentario: string;
+}
+
+export interface RedacaoCorrecao {
+  c1: CompetenciaScore;
+  c2: CompetenciaScore;
+  c3: CompetenciaScore;
+  c4: CompetenciaScore;
+  c5: CompetenciaScore;
+  total: number; // 0-1000
+  resumo: string;
+  pontosFortes: string[];
+  aMelhorar: string[];
+  model?: string;
+  createdAt: string;
+}
+
+export interface Redacao {
+  id: string;
+  tema: string;
+  text: string;
+  createdAt: string;
+  correcao?: RedacaoCorrecao;
 }
 
 export interface Settings {
@@ -71,6 +114,7 @@ export interface Settings {
   enemDates: string[]; // ISO date (yyyy-mm-dd)
   theme: "light" | "dark" | "system";
   onboarded: boolean;
+  diagnosticDone?: boolean;
 }
 
 export interface AppData {
@@ -78,6 +122,7 @@ export interface AppData {
   questions: Question[];
   attempts: Attempt[];
   sessions: Session[];
+  redacoes: Redacao[];
   favorites: string[]; // questionId[]
   reviewedAt: Record<string, string>; // questionId -> ISO da última revisão
   settings: Settings;

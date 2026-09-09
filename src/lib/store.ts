@@ -16,7 +16,9 @@ import { DEFAULT_ENEM_DATES } from "@/lib/enem";
 import type {
   AppData,
   Attempt,
+  Difficulty,
   Question,
+  Redacao,
   Session,
   Settings,
 } from "@/types";
@@ -24,7 +26,7 @@ import type {
 const LS_KEY = "ea:v2:data";
 const LS_TS_KEY = "ea:v2:ts";
 const RTDB_PATH = "valessa/data";
-const DATA_VERSION = 2;
+const DATA_VERSION = 3;
 
 export function genId(): string {
   try {
@@ -49,6 +51,7 @@ function defaultData(): AppData {
     questions: [],
     attempts: [],
     sessions: [],
+    redacoes: [],
     favorites: [],
     reviewedAt: {},
     settings: { ...DEFAULT_SETTINGS },
@@ -151,8 +154,22 @@ function migrateLegacy(): AppData | null {
 /* Hidratação e persistência                                           */
 /* ------------------------------------------------------------------ */
 
+const DIFFS = new Set<Difficulty>(["facil", "media", "dificil"]);
+const asDifficulty = (v: unknown): Difficulty | undefined =>
+  typeof v === "string" && DIFFS.has(v as Difficulty) ? (v as Difficulty) : undefined;
+
+function asStrMap(v: unknown): Record<string, string> | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, val] of Object.entries(v as Rec)) {
+    if (typeof val === "string" && val.trim()) out[k] = val;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 function normQuestion(v: unknown): Question {
   const q = asObj(v);
+  const year = Number(q.year);
   return {
     id: asStr(q.id) || genId(),
     subject: asStr(q.subject),
@@ -161,6 +178,10 @@ function normQuestion(v: unknown): Question {
     options: Array.isArray(q.options) ? (q.options as Question["options"]) : [],
     correctOption: asStr(q.correctOption),
     explanation: asStr(q.explanation) || undefined,
+    optionComments: asStrMap(q.optionComments),
+    year: Number.isFinite(year) && year > 1990 ? year : undefined,
+    difficulty: asDifficulty(q.difficulty),
+    skill: asStr(q.skill) || undefined,
     imageUrl: asStr(q.imageUrl) || undefined,
     possiblyHasImage: !!q.possiblyHasImage,
     source: asStr(q.source) || undefined,
@@ -180,9 +201,24 @@ function normAttempt(v: unknown): Attempt {
     userAnswer: asStr(a.userAnswer ?? a.selected),
     correctAnswer: asStr(a.correctAnswer ?? a.correct),
     reason: (asStr(a.reason ?? a.errorReason) || null) as Attempt["reason"],
+    difficulty: asDifficulty(a.difficulty),
     timeSpent: typeof a.timeSpent === "number" ? a.timeSpent : 0,
-    mode: a.mode === "prova" ? "prova" : "treino",
+    mode:
+      a.mode === "prova" ? "prova" : a.mode === "prova-real" ? "prova-real" : "treino",
     createdAt: asStr(a.createdAt ?? a.date) || new Date().toISOString(),
+  };
+}
+
+function normRedacao(v: unknown): Redacao {
+  const r = asObj(v);
+  return {
+    id: asStr(r.id) || genId(),
+    tema: asStr(r.tema),
+    text: asStr(r.text),
+    createdAt: asStr(r.createdAt) || new Date().toISOString(),
+    correcao: r.correcao && typeof r.correcao === "object"
+      ? (r.correcao as Redacao["correcao"])
+      : undefined,
   };
 }
 
@@ -200,6 +236,9 @@ function coerce(input: unknown): AppData {
     sessions: Array.isArray(parsed.sessions)
       ? (parsed.sessions as Session[])
       : base.sessions,
+    redacoes: Array.isArray(parsed.redacoes)
+      ? parsed.redacoes.map(normRedacao)
+      : base.redacoes,
     favorites: Array.isArray(parsed.favorites)
       ? parsed.favorites.filter((f): f is string => typeof f === "string")
       : base.favorites,
@@ -299,6 +338,7 @@ function mutate(fn: (d: AppData) => void) {
     questions: [...data.questions],
     attempts: [...data.attempts],
     sessions: [...data.sessions],
+    redacoes: [...data.redacoes],
     favorites: [...data.favorites],
     reviewedAt: { ...data.reviewedAt },
     settings: { ...data.settings },
@@ -409,6 +449,27 @@ export function updateSettings(patch: Partial<Settings>) {
   });
 }
 
+export function addRedacao(r: Omit<Redacao, "id" | "createdAt">): string {
+  const id = genId();
+  mutate((d) => {
+    d.redacoes.push({ ...r, id, createdAt: new Date().toISOString() });
+  });
+  return id;
+}
+
+export function updateRedacao(id: string, patch: Partial<Redacao>) {
+  mutate((d) => {
+    const i = d.redacoes.findIndex((r) => r.id === id);
+    if (i >= 0) d.redacoes[i] = { ...d.redacoes[i], ...patch, id };
+  });
+}
+
+export function deleteRedacao(id: string) {
+  mutate((d) => {
+    d.redacoes = d.redacoes.filter((r) => r.id !== id);
+  });
+}
+
 export function exportData(): AppData {
   if (!hydrated) hydrate();
   return data ?? defaultData();
@@ -427,6 +488,7 @@ export function importData(incoming: unknown, mode: "merge" | "replace" = "merge
       d.questions = parsed.questions;
       d.attempts = parsed.attempts;
       d.sessions = parsed.sessions;
+      d.redacoes = parsed.redacoes;
       d.favorites = parsed.favorites;
       d.reviewedAt = parsed.reviewedAt;
       d.settings = parsed.settings;
@@ -438,6 +500,8 @@ export function importData(incoming: unknown, mode: "merge" | "replace" = "merge
     for (const a of parsed.attempts) if (!aIds.has(a.id)) d.attempts.push(a);
     const sIds = new Set(d.sessions.map((s) => s.id));
     for (const s of parsed.sessions) if (!sIds.has(s.id)) d.sessions.push(s);
+    const rIds = new Set(d.redacoes.map((r) => r.id));
+    for (const r of parsed.redacoes) if (!rIds.has(r.id)) d.redacoes.push(r);
     d.favorites = Array.from(new Set([...d.favorites, ...parsed.favorites]));
     d.reviewedAt = { ...d.reviewedAt, ...parsed.reviewedAt };
   });
@@ -502,4 +566,8 @@ export function useQuestions(): Question[] {
 
 export function useAttempts(): Attempt[] {
   return useAppData().attempts;
+}
+
+export function useRedacoes(): Redacao[] {
+  return useAppData().redacoes;
 }

@@ -143,6 +143,9 @@ Formato obrigatório:
    ],
    "correctOption":"",
    "explanation":"",
+   "optionComments":{"A":"","B":"","C":"","D":"","E":""},
+   "year":0,
+   "difficulty":"",
    "possiblyHasImage":false
   }
  ]
@@ -152,13 +155,15 @@ Formato obrigatório:
 Regras:
 
 - Não use markdown.
-- Não escreva explicações.
-- Não invente texto.
-- Preserve o texto original.
+- Não invente o enunciado nem as alternativas: preserve o texto original.
 - Se não existir alternativa, use options [].
 - Se depender de imagem/gráfico/tabela, possiblyHasImage=true.
 - Se não souber a resposta, deixe correctOption vazio.
-- Se o texto trouxer a resolução/comentário da questão, resuma em explanation; senão deixe "".
+- explanation: explique em 1-2 frases por que a alternativa correta está certa.
+- optionComments: para CADA alternativa, 1 frase dizendo por que está certa ou errada.
+  Isso é obrigatório quando você souber o gabarito. Se não souber, deixe {}.
+- year: o ano da prova, se aparecer no texto (ex: 2019). Senão, 0.
+- difficulty: estime "facil", "media" ou "dificil" pela complexidade do raciocínio. Se não der, "".
 
 
 Texto:
