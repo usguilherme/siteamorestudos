@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { updateSettings, useAppData, useHydrated } from "@/lib/store";
 import { usePriorities, useStats } from "@/lib/stats";
 import { areaShort, incidenceLabel } from "@/lib/enem";
+import { resumoFor } from "@/lib/resumos";
 import { cn } from "@/lib/cn";
 import {
   Badge,
@@ -107,13 +108,24 @@ export default function DiagnosticoPage() {
                 </p>
                 <p className="mt-0.5 text-xs text-faint">{p.reason}</p>
               </div>
-              <ButtonLink
-                href={`/simulado?topic=${encodeURIComponent(p.topic)}&area=${encodeURIComponent(p.subject)}&auto=1`}
-                size="sm"
-                variant="secondary"
-              >
-                Treinar
-              </ButtonLink>
+              <div className="flex shrink-0 flex-col gap-1.5">
+                <ButtonLink
+                  href={`/simulado?topic=${encodeURIComponent(p.topic)}&area=${encodeURIComponent(p.subject)}&auto=1`}
+                  size="sm"
+                  variant="secondary"
+                >
+                  Treinar
+                </ButtonLink>
+                {resumoFor(p.topic) ? (
+                  <ButtonLink
+                    href={`/resumos?t=${encodeURIComponent(p.topic)}`}
+                    size="sm"
+                    variant="ghost"
+                  >
+                    Resumo
+                  </ButtonLink>
+                ) : null}
+              </div>
             </div>
           </Card>
         ))}

@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import {
   exportData,
   importData,
+  clearQuestions,
   resetData,
   useHydrated,
   useSettings,
@@ -167,21 +168,38 @@ export default function AjustesPage() {
 
       <Card className="space-y-3 border-[var(--bad)]/30 p-5 sm:p-6">
         <p className="text-xs font-semibold text-bad">Zona de perigo</p>
-        <Button
-          variant="danger"
-          onClick={() => {
-            if (
-              confirm(
-                "Apagar TODAS as questões, histórico, favoritas e sessões? Faça um backup antes. Não dá pra desfazer.",
-              )
-            ) {
-              resetData();
-              say("Tudo apagado. Recomeço limpo. 🤍");
-            }
-          }}
-        >
-          Apagar todos os dados
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="danger"
+            onClick={() => {
+              if (
+                confirm(
+                  "Zerar seu progresso (tentativas, sessões, redações, favoritas)? O banco de questões continua. Não dá pra desfazer.",
+                )
+              ) {
+                resetData();
+                say("Progresso zerado. Recomeço limpo. 🤍");
+              }
+            }}
+          >
+            Zerar meu progresso
+          </Button>
+          <Button
+            variant="danger"
+            onClick={() => {
+              if (
+                confirm(
+                  "Apagar TODAS as questões do banco? Isso afeta todos os aparelhos. Faça um backup antes.",
+                )
+              ) {
+                clearQuestions();
+                say("Banco de questões apagado.");
+              }
+            }}
+          >
+            Apagar banco de questões
+          </Button>
+        </div>
       </Card>
     </div>
   );

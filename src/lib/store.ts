@@ -2,12 +2,16 @@
 
 // Camada de dados única do app.
 //
-// - Fonte da verdade: um único objeto `AppData` em memória.
+// - Fonte da verdade: um objeto `AppData` em memória.
 // - Persistência local: localStorage (sempre, funciona offline).
 // - Persistência remota: Realtime Database (opcional — só se configurado).
-//   Estratégia simples para um único usuário: espelha o blob inteiro em
-//   `valessa/data` com `updatedAt`; na chegada de um estado remoto mais novo,
-//   substitui o local. Last-write-wins no documento inteiro.
+//
+// O banco de questões é grande e muda pouco; os dados da aluna (tentativas,
+// redações, ajustes) são pequenos e mudam a cada questão respondida. Por isso
+// ficam em nós/chaves SEPARADOS — assim responder uma questão não reescreve
+// 3 MB de questões toda hora.
+//   valessa/questions  ->  { list: Question[], updatedAt }
+//   valessa/user       ->  { ...resto do AppData, updatedAt }
 
 import { useMemo, useSyncExternalStore } from "react";
 import { onValue, ref, set as rtdbSet } from "firebase/database";
@@ -23,9 +27,13 @@ import type {
   Settings,
 } from "@/types";
 
-const LS_KEY = "ea:v2:data";
-const LS_TS_KEY = "ea:v2:ts";
-const RTDB_PATH = "valessa/data";
+const LEGACY_KEY = "ea:v2:data"; // versão antiga combinada
+const USER_KEY = "ea:v2:user";
+const USER_TS = "ea:v2:user_ts";
+const Q_KEY = "ea:v2:questions";
+const Q_TS = "ea:v2:questions_ts";
+const RTDB_USER = "valessa/user";
+const RTDB_Q = "valessa/questions";
 const DATA_VERSION = 3;
 
 export function genId(): string {
@@ -58,101 +66,29 @@ function defaultData(): AppData {
   };
 }
 
-// Snapshot estável para SSR / primeira renderização (antes da hidratação).
 const SERVER_SNAPSHOT = defaultData();
 
 let data: AppData | null = null;
 let hydrated = false;
-let updatedAt = 0;
+let userUpdatedAt = 0;
+let qUpdatedAt = 0;
 let applyingRemote = false;
 
 const listeners = new Set<() => void>();
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let userTimer: ReturnType<typeof setTimeout> | null = null;
+let qTimer: ReturnType<typeof setTimeout> | null = null;
 
 function emit() {
   for (const l of listeners) l();
 }
 
 /* ------------------------------------------------------------------ */
-/* Migração dos dados antigos (chaves estudos_amor_*)                  */
+/* Normalização                                                        */
 /* ------------------------------------------------------------------ */
 
 type Rec = Record<string, unknown>;
 const asStr = (v: unknown, d = ""): string => (typeof v === "string" ? v : d);
-const asObj = (v: unknown): Rec =>
-  v && typeof v === "object" ? (v as Rec) : {};
-
-function readLegacy(key: string): Rec[] {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.map(asObj) : [];
-  } catch {
-    return [];
-  }
-}
-
-function migrateLegacy(): AppData | null {
-  const legacyQuestions = readLegacy("estudos_amor_questions");
-  const legacyHistory = readLegacy("estudos_amor_history");
-  const legacyFavorites = readLegacy("estudos_amor_favorites");
-
-  if (!legacyQuestions.length && !legacyHistory.length && !legacyFavorites.length) {
-    return null;
-  }
-
-  const base = defaultData();
-  const byStatement = new Map<string, string>();
-
-  base.questions = legacyQuestions.map((q) => {
-    const id = asStr(q.id) || genId();
-    const statement = asStr(q.statement);
-    if (statement) byStatement.set(statement, id);
-    return {
-      id,
-      subject: asStr(q.subject),
-      topic: asStr(q.topic),
-      statement,
-      options: Array.isArray(q.options)
-        ? (q.options as Question["options"])
-        : [],
-      correctOption: asStr(q.correctOption),
-      explanation: asStr(q.explanation) || undefined,
-      source: asStr(q.source) || undefined,
-      createdAt: asStr(q.createdAt) || new Date().toISOString(),
-    } satisfies Question;
-  });
-
-  base.attempts = legacyHistory.map((h) => ({
-    id: genId(),
-    questionId: byStatement.get(asStr(h.statement)) ?? "",
-    statement: asStr(h.statement),
-    subject: asStr(h.subject),
-    topic: asStr(h.topic),
-    isCorrect: !!h.isCorrect,
-    userAnswer: asStr(h.selected),
-    correctAnswer: asStr(h.correct),
-    reason: (asStr(h.errorReason) || null) as Attempt["reason"],
-    timeSpent: 0,
-    mode: "treino" as const,
-    createdAt: asStr(h.date) || new Date().toISOString(),
-  } satisfies Attempt));
-
-  base.favorites = Array.from(
-    new Set(
-      legacyFavorites
-        .map((f) => byStatement.get(asStr(f.statement)))
-        .filter((id): id is string => typeof id === "string"),
-    ),
-  );
-
-  return base;
-}
-
-/* ------------------------------------------------------------------ */
-/* Hidratação e persistência                                           */
-/* ------------------------------------------------------------------ */
+const asObj = (v: unknown): Rec => (v && typeof v === "object" ? (v as Rec) : {});
 
 const DIFFS = new Set<Difficulty>(["facil", "media", "dificil"]);
 const asDifficulty = (v: unknown): Difficulty | undefined =>
@@ -189,6 +125,9 @@ function normQuestion(v: unknown): Question {
   };
 }
 
+const normQuestions = (v: unknown): Question[] =>
+  Array.isArray(v) ? v.map(normQuestion) : [];
+
 function normAttempt(v: unknown): Attempt {
   const a = asObj(v);
   return {
@@ -216,20 +155,19 @@ function normRedacao(v: unknown): Redacao {
     tema: asStr(r.tema),
     text: asStr(r.text),
     createdAt: asStr(r.createdAt) || new Date().toISOString(),
-    correcao: r.correcao && typeof r.correcao === "object"
-      ? (r.correcao as Redacao["correcao"])
-      : undefined,
+    correcao:
+      r.correcao && typeof r.correcao === "object"
+        ? (r.correcao as Redacao["correcao"])
+        : undefined,
   };
 }
 
-function coerce(input: unknown): AppData {
+/** Parte "usuário" do AppData (tudo menos as questões). */
+function coerceUser(input: unknown): Omit<AppData, "questions"> {
   const parsed = asObj(input);
   const base = defaultData();
   return {
     version: DATA_VERSION,
-    questions: Array.isArray(parsed.questions)
-      ? parsed.questions.map(normQuestion)
-      : base.questions,
     attempts: Array.isArray(parsed.attempts)
       ? parsed.attempts.map(normAttempt)
       : base.attempts,
@@ -250,73 +188,200 @@ function coerce(input: unknown): AppData {
   };
 }
 
+/* ------------------------------------------------------------------ */
+/* Migração dos dados antigos                                          */
+/* ------------------------------------------------------------------ */
+
+function readLegacyArray(key: string): Rec[] {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map(asObj) : [];
+  } catch {
+    return [];
+  }
+}
+
+function migrateVeryOld(): AppData | null {
+  const lq = readLegacyArray("estudos_amor_questions");
+  const lh = readLegacyArray("estudos_amor_history");
+  const lf = readLegacyArray("estudos_amor_favorites");
+  if (!lq.length && !lh.length && !lf.length) return null;
+
+  const base = defaultData();
+  const byStatement = new Map<string, string>();
+
+  base.questions = lq.map((q) => {
+    const id = asStr(q.id) || genId();
+    const statement = asStr(q.statement);
+    if (statement) byStatement.set(statement, id);
+    return normQuestion({ ...q, id, statement });
+  });
+
+  base.attempts = lh.map((h) =>
+    normAttempt({
+      ...h,
+      questionId: byStatement.get(asStr(h.statement)) ?? "",
+    }),
+  );
+
+  base.favorites = Array.from(
+    new Set(
+      lf
+        .map((f) => byStatement.get(asStr(f.statement)))
+        .filter((id): id is string => typeof id === "string"),
+    ),
+  );
+
+  return base;
+}
+
+/* ------------------------------------------------------------------ */
+/* Hidratação e persistência                                           */
+/* ------------------------------------------------------------------ */
+
 function hydrate() {
   if (hydrated || typeof window === "undefined") return;
   hydrated = true;
 
   try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (raw) {
-      data = coerce(JSON.parse(raw));
-      updatedAt = Number(localStorage.getItem(LS_TS_KEY)) || 1;
+    const rawUser = localStorage.getItem(USER_KEY);
+    const rawQ = localStorage.getItem(Q_KEY);
+    const rawLegacy = localStorage.getItem(LEGACY_KEY);
+
+    if (rawUser || rawQ) {
+      const user = coerceUser(rawUser ? JSON.parse(rawUser) : {});
+      const questions = normQuestions(rawQ ? JSON.parse(rawQ) : []);
+      data = { ...user, questions };
+      userUpdatedAt = Number(localStorage.getItem(USER_TS)) || 1;
+      qUpdatedAt = Number(localStorage.getItem(Q_TS)) || (questions.length ? 1 : 0);
+    } else if (rawLegacy) {
+      // migra o formato combinado antigo → dois blocos
+      const parsed = asObj(JSON.parse(rawLegacy));
+      data = {
+        ...coerceUser(parsed),
+        questions: normQuestions(parsed.questions),
+      };
+      userUpdatedAt = Date.now();
+      qUpdatedAt = data.questions.length ? Date.now() : 0;
+      writeLocalUser();
+      writeLocalQuestions();
+      try {
+        localStorage.removeItem(LEGACY_KEY);
+        localStorage.removeItem("ea:v2:ts");
+      } catch {
+        /* noop */
+      }
     } else {
-      const migrated = migrateLegacy();
-      data = migrated ?? defaultData();
-      // dados migrados são "reais" e devem vencer a nuvem vazia;
-      // um começo do zero (updatedAt=0) deixa a nuvem preencher.
-      updatedAt = migrated ? Date.now() : 0;
-      writeLocal();
+      const veryOld = migrateVeryOld();
+      data = veryOld ?? defaultData();
+      userUpdatedAt = veryOld ? Date.now() : 0;
+      qUpdatedAt = veryOld && veryOld.questions.length ? Date.now() : 0;
+      writeLocalUser();
+      writeLocalQuestions();
     }
   } catch {
     data = defaultData();
-    updatedAt = 0;
+    userUpdatedAt = 0;
+    qUpdatedAt = 0;
   }
 
   attachRemote();
   emit();
 }
 
-function writeLocal() {
+function userSlice(d: AppData) {
+  const { questions: _q, ...rest } = d;
+  void _q;
+  return rest;
+}
+
+function writeLocalUser() {
   if (!data || typeof window === "undefined") return;
   try {
-    localStorage.setItem(LS_KEY, JSON.stringify(data));
-    localStorage.setItem(LS_TS_KEY, String(updatedAt));
+    localStorage.setItem(USER_KEY, JSON.stringify(userSlice(data)));
+    localStorage.setItem(USER_TS, String(userUpdatedAt));
   } catch (e) {
-    console.warn("[store] falha ao gravar localStorage:", e);
+    console.warn("[store] falha ao gravar user:", e);
   }
 }
 
-function pushRemote() {
+function writeLocalQuestions() {
+  if (!data || typeof window === "undefined") return;
+  try {
+    localStorage.setItem(Q_KEY, JSON.stringify(data.questions));
+    localStorage.setItem(Q_TS, String(qUpdatedAt));
+  } catch (e) {
+    console.warn("[store] falha ao gravar questions:", e);
+  }
+}
+
+function pushUser() {
   if (!rtdb || !data) return;
   try {
-    // O Realtime Database rejeita qualquer `undefined` no payload — o
-    // round-trip por JSON remove as chaves opcionais não preenchidas.
-    const payload = JSON.parse(JSON.stringify({ ...data, updatedAt }));
-    rtdbSet(ref(rtdb, RTDB_PATH), payload).catch((e) => {
-      console.warn("[store] sync remoto falhou:", e);
-    });
+    const payload = JSON.parse(
+      JSON.stringify({ ...userSlice(data), updatedAt: userUpdatedAt }),
+    );
+    rtdbSet(ref(rtdb, RTDB_USER), payload).catch((e) =>
+      console.warn("[store] sync user falhou:", e),
+    );
   } catch (e) {
-    console.warn("[store] sync remoto falhou:", e);
+    console.warn("[store] sync user falhou:", e);
   }
 }
 
-function schedulePersist() {
-  writeLocal();
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(pushRemote, 600);
+function pushQuestions() {
+  if (!rtdb || !data) return;
+  try {
+    const payload = JSON.parse(
+      JSON.stringify({ list: data.questions, updatedAt: qUpdatedAt }),
+    );
+    rtdbSet(ref(rtdb, RTDB_Q), payload).catch((e) =>
+      console.warn("[store] sync questions falhou:", e),
+    );
+  } catch (e) {
+    console.warn("[store] sync questions falhou:", e);
+  }
+}
+
+function scheduleUser() {
+  writeLocalUser();
+  if (userTimer) clearTimeout(userTimer);
+  userTimer = setTimeout(pushUser, 600);
+}
+
+function scheduleQuestions() {
+  writeLocalQuestions();
+  if (qTimer) clearTimeout(qTimer);
+  qTimer = setTimeout(pushQuestions, 800);
 }
 
 function attachRemote() {
   if (!rtdb) return;
-  onValue(ref(rtdb, RTDB_PATH), (snap) => {
+
+  onValue(ref(rtdb, RTDB_USER), (snap) => {
     const remote = snap.val();
-    if (!remote || typeof remote !== "object") return;
-    const remoteUpdatedAt = Number(remote.updatedAt ?? 0);
-    if (remoteUpdatedAt <= updatedAt) return; // local está igual ou mais novo
+    if (!remote || typeof remote !== "object" || !data) return;
+    const ts = Number(remote.updatedAt ?? 0);
+    if (ts <= userUpdatedAt) return;
     applyingRemote = true;
-    data = coerce(remote);
-    updatedAt = remoteUpdatedAt;
-    writeLocal();
+    data = { ...coerceUser(remote), questions: data.questions };
+    userUpdatedAt = ts;
+    writeLocalUser();
+    applyingRemote = false;
+    emit();
+  });
+
+  onValue(ref(rtdb, RTDB_Q), (snap) => {
+    const remote = snap.val();
+    if (!remote || typeof remote !== "object" || !data) return;
+    const ts = Number(remote.updatedAt ?? 0);
+    if (ts <= qUpdatedAt) return;
+    applyingRemote = true;
+    data = { ...data, questions: normQuestions(remote.list) };
+    qUpdatedAt = ts;
+    writeLocalQuestions();
     applyingRemote = false;
     emit();
   });
@@ -326,26 +391,41 @@ function attachRemote() {
 /* Mutações                                                            */
 /* ------------------------------------------------------------------ */
 
-function mutate(fn: (d: AppData) => void) {
+function clone(d: AppData): AppData {
+  return {
+    ...d,
+    questions: [...d.questions],
+    attempts: [...d.attempts],
+    sessions: [...d.sessions],
+    redacoes: [...d.redacoes],
+    favorites: [...d.favorites],
+    reviewedAt: { ...d.reviewedAt },
+    settings: { ...d.settings },
+  };
+}
+
+function mutateUser(fn: (d: AppData) => void) {
   if (typeof window === "undefined") return;
   if (!hydrated) hydrate();
   if (!data) data = defaultData();
   fn(data);
-  // `useSyncExternalStore` e os `useMemo` dos hooks comparam por referência —
-  // é preciso uma referência nova em cada nível que eles observam.
-  data = {
-    ...data,
-    questions: [...data.questions],
-    attempts: [...data.attempts],
-    sessions: [...data.sessions],
-    redacoes: [...data.redacoes],
-    favorites: [...data.favorites],
-    reviewedAt: { ...data.reviewedAt },
-    settings: { ...data.settings },
-  };
+  data = clone(data);
   if (!applyingRemote) {
-    updatedAt = Date.now();
-    schedulePersist();
+    userUpdatedAt = Date.now();
+    scheduleUser();
+  }
+  emit();
+}
+
+function mutateQuestions(fn: (d: AppData) => void) {
+  if (typeof window === "undefined") return;
+  if (!hydrated) hydrate();
+  if (!data) data = defaultData();
+  fn(data);
+  data = clone(data);
+  if (!applyingRemote) {
+    qUpdatedAt = Date.now();
+    scheduleQuestions();
   }
   emit();
 }
@@ -354,12 +434,8 @@ export function addQuestion(
   q: Omit<Question, "id" | "createdAt"> & { id?: string; createdAt?: string },
 ): string {
   const id = q.id ?? genId();
-  mutate((d) => {
-    d.questions.push({
-      ...q,
-      id,
-      createdAt: q.createdAt ?? new Date().toISOString(),
-    });
+  mutateQuestions((d) => {
+    d.questions.push({ ...q, id, createdAt: q.createdAt ?? new Date().toISOString() });
   });
   return id;
 }
@@ -368,7 +444,7 @@ export function addQuestions(
   list: Array<Omit<Question, "id" | "createdAt"> & { id?: string }>,
 ): string[] {
   const ids: string[] = [];
-  mutate((d) => {
+  mutateQuestions((d) => {
     for (const q of list) {
       const id = q.id ?? genId();
       ids.push(id);
@@ -379,14 +455,14 @@ export function addQuestions(
 }
 
 export function updateQuestion(id: string, patch: Partial<Question>) {
-  mutate((d) => {
+  mutateQuestions((d) => {
     const i = d.questions.findIndex((q) => q.id === id);
     if (i >= 0) d.questions[i] = { ...d.questions[i], ...patch, id };
   });
 }
 
 export function deleteQuestion(id: string) {
-  mutate((d) => {
+  mutateQuestions((d) => {
     d.questions = d.questions.filter((q) => q.id !== id);
     d.favorites = d.favorites.filter((f) => f !== id);
   });
@@ -394,27 +470,27 @@ export function deleteQuestion(id: string) {
 
 export function recordAttempt(a: Omit<Attempt, "id" | "createdAt">): string {
   const id = genId();
-  mutate((d) => {
+  mutateUser((d) => {
     d.attempts.push({ ...a, id, createdAt: new Date().toISOString() });
   });
   return id;
 }
 
 export function updateAttempt(id: string, patch: Partial<Attempt>) {
-  mutate((d) => {
+  mutateUser((d) => {
     const i = d.attempts.findIndex((a) => a.id === id);
     if (i >= 0) d.attempts[i] = { ...d.attempts[i], ...patch, id };
   });
 }
 
 export function deleteAttempt(id: string) {
-  mutate((d) => {
+  mutateUser((d) => {
     d.attempts = d.attempts.filter((a) => a.id !== id);
   });
 }
 
 export function clearAttempts() {
-  mutate((d) => {
+  mutateUser((d) => {
     d.attempts = [];
     d.sessions = [];
     d.reviewedAt = {};
@@ -423,14 +499,14 @@ export function clearAttempts() {
 
 export function saveSession(s: Omit<Session, "id" | "createdAt">): string {
   const id = genId();
-  mutate((d) => {
+  mutateUser((d) => {
     d.sessions.push({ ...s, id, createdAt: new Date().toISOString() });
   });
   return id;
 }
 
 export function toggleFavorite(questionId: string) {
-  mutate((d) => {
+  mutateUser((d) => {
     d.favorites = d.favorites.includes(questionId)
       ? d.favorites.filter((f) => f !== questionId)
       : [...d.favorites, questionId];
@@ -438,34 +514,34 @@ export function toggleFavorite(questionId: string) {
 }
 
 export function markReviewed(questionId: string) {
-  mutate((d) => {
+  mutateUser((d) => {
     d.reviewedAt[questionId] = new Date().toISOString();
   });
 }
 
 export function updateSettings(patch: Partial<Settings>) {
-  mutate((d) => {
+  mutateUser((d) => {
     d.settings = { ...d.settings, ...patch };
   });
 }
 
 export function addRedacao(r: Omit<Redacao, "id" | "createdAt">): string {
   const id = genId();
-  mutate((d) => {
+  mutateUser((d) => {
     d.redacoes.push({ ...r, id, createdAt: new Date().toISOString() });
   });
   return id;
 }
 
 export function updateRedacao(id: string, patch: Partial<Redacao>) {
-  mutate((d) => {
+  mutateUser((d) => {
     const i = d.redacoes.findIndex((r) => r.id === id);
     if (i >= 0) d.redacoes[i] = { ...d.redacoes[i], ...patch, id };
   });
 }
 
 export function deleteRedacao(id: string) {
-  mutate((d) => {
+  mutateUser((d) => {
     d.redacoes = d.redacoes.filter((r) => r.id !== id);
   });
 }
@@ -477,42 +553,64 @@ export function exportData(): AppData {
 
 export function importData(incoming: unknown, mode: "merge" | "replace" = "merge") {
   const raw = asObj(incoming);
-  // aceita também backups antigos no formato {questions, history, favorites}
-  const parsed = coerce(
+  const source =
     raw.questions || raw.attempts || raw.settings
       ? raw
-      : { questions: raw.questions, attempts: raw.history, favorites: raw.favorites },
-  );
-  mutate((d) => {
+      : { questions: raw.questions, attempts: raw.history, favorites: raw.favorites };
+  const user = coerceUser(source);
+  const questions = normQuestions(asObj(source).questions);
+
+  const applyQ = (d: AppData) => {
     if (mode === "replace") {
-      d.questions = parsed.questions;
-      d.attempts = parsed.attempts;
-      d.sessions = parsed.sessions;
-      d.redacoes = parsed.redacoes;
-      d.favorites = parsed.favorites;
-      d.reviewedAt = parsed.reviewedAt;
-      d.settings = parsed.settings;
+      d.questions = questions;
       return;
     }
-    const qIds = new Set(d.questions.map((q) => q.id));
-    for (const q of parsed.questions) if (!qIds.has(q.id)) d.questions.push(q);
+    const ids = new Set(d.questions.map((q) => q.id));
+    for (const q of questions) if (!ids.has(q.id)) d.questions.push(q);
+  };
+  const applyUser = (d: AppData) => {
+    if (mode === "replace") {
+      d.attempts = user.attempts;
+      d.sessions = user.sessions;
+      d.redacoes = user.redacoes;
+      d.favorites = user.favorites;
+      d.reviewedAt = user.reviewedAt;
+      d.settings = user.settings;
+      return;
+    }
     const aIds = new Set(d.attempts.map((a) => a.id));
-    for (const a of parsed.attempts) if (!aIds.has(a.id)) d.attempts.push(a);
+    for (const a of user.attempts) if (!aIds.has(a.id)) d.attempts.push(a);
     const sIds = new Set(d.sessions.map((s) => s.id));
-    for (const s of parsed.sessions) if (!sIds.has(s.id)) d.sessions.push(s);
+    for (const s of user.sessions) if (!sIds.has(s.id)) d.sessions.push(s);
     const rIds = new Set(d.redacoes.map((r) => r.id));
-    for (const r of parsed.redacoes) if (!rIds.has(r.id)) d.redacoes.push(r);
-    d.favorites = Array.from(new Set([...d.favorites, ...parsed.favorites]));
-    d.reviewedAt = { ...d.reviewedAt, ...parsed.reviewedAt };
+    for (const r of user.redacoes) if (!rIds.has(r.id)) d.redacoes.push(r);
+    d.favorites = Array.from(new Set([...d.favorites, ...user.favorites]));
+    d.reviewedAt = { ...d.reviewedAt, ...user.reviewedAt };
+  };
+
+  if (questions.length) mutateQuestions(applyQ);
+  mutateUser(applyUser);
+}
+
+/** Zera o progresso da aluna (tentativas, sessões, redações, favoritas).
+ *  Não mexe no banco de questões. */
+export function resetData() {
+  mutateUser((d) => {
+    const keepName = d.settings.name;
+    d.attempts = [];
+    d.sessions = [];
+    d.redacoes = [];
+    d.favorites = [];
+    d.reviewedAt = {};
+    d.settings = { ...DEFAULT_SETTINGS, name: keepName, onboarded: true };
   });
 }
 
-export function resetData() {
-  mutate((d) => {
-    const keepName = d.settings.name;
-    Object.assign(d, defaultData());
-    d.settings.name = keepName;
-    d.settings.onboarded = true;
+/** Apaga TODAS as questões do banco. */
+export function clearQuestions() {
+  mutateQuestions((d) => {
+    d.questions = [];
+    d.favorites = [];
   });
 }
 
@@ -528,19 +626,13 @@ function subscribe(listener: () => void) {
   };
 }
 
-function getSnapshot(): AppData {
-  return data ?? SERVER_SNAPSHOT;
-}
-
-function getServerSnapshot(): AppData {
-  return SERVER_SNAPSHOT;
-}
+const getSnapshot = (): AppData => data ?? SERVER_SNAPSHOT;
+const getServerSnapshot = (): AppData => SERVER_SNAPSHOT;
 
 export function useAppData(): AppData {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
-/** true depois que o localStorage foi lido (evita flash de "vazio"). */
 export function useHydrated(): boolean {
   return useSyncExternalStore(
     subscribe,
@@ -550,8 +642,7 @@ export function useHydrated(): boolean {
 }
 
 export function useSettings(): [Settings, (patch: Partial<Settings>) => void] {
-  const d = useAppData();
-  return [d.settings, updateSettings];
+  return [useAppData().settings, updateSettings];
 }
 
 export function useFavorites(): [Set<string>, (id: string) => void] {

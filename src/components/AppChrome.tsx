@@ -9,16 +9,17 @@ import { greeting } from "@/lib/messages";
 import { cn } from "@/lib/cn";
 
 const NAV = [
-  { href: "/", label: "Início", icon: "🏠" },
+  { href: "/plano", label: "Plano de hoje", icon: "🗓️" },
   { href: "/simulado", label: "Simulado", icon: "📝" },
   { href: "/redacao", label: "Redação", icon: "✍️" },
   { href: "/desempenho", label: "Desempenho", icon: "📊" },
   { href: "/revisar-erros", label: "Revisar erros", icon: "🔁" },
-  { href: "/diagnostico", label: "Prioridades", icon: "🎯" },
 ];
 
 // só no menu mobile / secundário
 const NAV_EXTRA = [
+  { href: "/diagnostico", label: "Prioridades", icon: "🎯" },
+  { href: "/resumos", label: "Resumos", icon: "📄" },
   { href: "/materias", label: "Matérias", icon: "📚" },
   { href: "/favoritas", label: "Favoritas", icon: "⭐" },
   { href: "/historico", label: "Histórico", icon: "🕘" },
