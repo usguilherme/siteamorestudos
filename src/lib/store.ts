@@ -250,7 +250,10 @@ function writeLocal() {
 function pushRemote() {
   if (!rtdb || !data) return;
   try {
-    rtdbSet(ref(rtdb, RTDB_PATH), { ...data, updatedAt }).catch((e) => {
+    // O Realtime Database rejeita qualquer `undefined` no payload — o
+    // round-trip por JSON remove as chaves opcionais não preenchidas.
+    const payload = JSON.parse(JSON.stringify({ ...data, updatedAt }));
+    rtdbSet(ref(rtdb, RTDB_PATH), payload).catch((e) => {
       console.warn("[store] sync remoto falhou:", e);
     });
   } catch (e) {
@@ -289,6 +292,17 @@ function mutate(fn: (d: AppData) => void) {
   if (!hydrated) hydrate();
   if (!data) data = defaultData();
   fn(data);
+  // `useSyncExternalStore` e os `useMemo` dos hooks comparam por referência —
+  // é preciso uma referência nova em cada nível que eles observam.
+  data = {
+    ...data,
+    questions: [...data.questions],
+    attempts: [...data.attempts],
+    sessions: [...data.sessions],
+    favorites: [...data.favorites],
+    reviewedAt: { ...data.reviewedAt },
+    settings: { ...data.settings },
+  };
   if (!applyingRemote) {
     updatedAt = Date.now();
     schedulePersist();
