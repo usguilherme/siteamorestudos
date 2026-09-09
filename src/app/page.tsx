@@ -1,90 +1,180 @@
+"use client";
+
 import Link from "next/link";
+import { useHydrated, useSettings } from "@/lib/store";
+import { useStats } from "@/lib/stats";
+import { greeting } from "@/lib/messages";
+import { EnemCountdown } from "@/components/Countdown";
+import {
+  Badge,
+  ButtonLink,
+  Card,
+  ProgressBar,
+} from "@/components/ui";
+
+const FEATURES = [
+  {
+    href: "/simulado",
+    icon: "📝",
+    title: "Simulado",
+    desc: "Questões cronometradas por matéria, com modo treino ou prova.",
+  },
+  {
+    href: "/desempenho",
+    icon: "📊",
+    title: "Desempenho",
+    desc: "Gráficos de evolução, pontos fortes e o que revisar primeiro.",
+  },
+  {
+    href: "/revisar-erros",
+    icon: "🔁",
+    title: "Revisar erros",
+    desc: "Fila de revisão espaçada com o que você errou e ainda não recuperou.",
+  },
+  {
+    href: "/favoritas",
+    icon: "⭐",
+    title: "Favoritas",
+    desc: "Seu caderno de questões marcadas pra revisar antes da prova.",
+  },
+  {
+    href: "/materias",
+    icon: "📚",
+    title: "Matérias",
+    desc: "Banco de questões organizado por área e assunto do ENEM.",
+  },
+  {
+    href: "/historico",
+    icon: "🕘",
+    title: "Histórico",
+    desc: "Tudo que você já respondeu, com filtros e busca.",
+  },
+];
 
 export default function HomePage() {
+  const hydrated = useHydrated();
+  const [settings] = useSettings();
+  const stats = useStats();
+
+  const goalPct = settings.dailyGoal
+    ? Math.round((stats.todayCount / settings.dailyGoal) * 100)
+    : 0;
+  const goalDone = stats.todayCount >= settings.dailyGoal;
+
   return (
-    <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 space-y-12">
-      {/* Hero Section Premium */}
-      <div className="relative overflow-hidden rounded-3xl border border-slate-200/80 bg-gradient-to-b from-white via-indigo-50/30 to-blue-50/50 p-8 sm:p-16 shadow-xl shadow-slate-100 text-center space-y-8">
-        {/* Glow effect de fundo */}
-        <div className="absolute -top-24 left-1/2 -translate-x-1/2 h-48 w-96 rounded-full bg-indigo-500/10 blur-3xl pointer-events-none" />
-
-        <div className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-1.5 text-xs font-bold text-indigo-600 shadow-sm border border-indigo-100">
-          <span className="animate-pulse">✨</span> Powered by Google Gemini & Next.js
-        </div>
-
-        <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 sm:text-6xl">
-          Estudos do Amor <span className="text-rose-500 inline-block animate-bounce">❤️</span>
-        </h1>
-
-        <p className="mx-auto max-w-2xl text-base sm:text-lg text-slate-600 leading-relaxed font-normal">
-          A plataforma definitiva de alta performance para o ENEM. Extração inteligente de PDFs por IA, simulados cronometrados e análises profundas de desempenho.
+    <div className="mx-auto max-w-6xl space-y-8 px-4 py-8 sm:px-6">
+      {/* Hero */}
+      <section className="animate-fade-up space-y-2">
+        <p className="text-sm font-semibold text-muted">
+          {hydrated ? `${greeting(settings.name)} 💛` : " "}
         </p>
-
-        <div className="flex flex-wrap justify-center gap-4 pt-4">
-          <Link
-            href="/simulado"
-            className="group relative inline-flex items-center gap-2 rounded-2xl bg-indigo-600 px-7 py-4 text-sm font-bold text-white shadow-lg shadow-indigo-500/25 transition-all duration-300 hover:bg-indigo-700 hover:scale-[1.02] active:scale-[0.98]"
-          >
-            <span>Começar Simulado</span>
-            <span className="transition-transform group-hover:translate-x-1">🚀</span>
-          </Link>
-
-          <Link
-            href="/admin/nova-questao"
-            className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-7 py-4 text-sm font-bold text-slate-700 shadow-sm transition-all duration-300 hover:bg-slate-50 hover:border-slate-300 hover:scale-[1.02]"
-          >
-            <span>📄 Importar PDF com IA</span>
-          </Link>
+        <h1 className="text-3xl font-extrabold tracking-tight text-text sm:text-4xl">
+          Pronta pra dar mais um passo rumo à aprovação?
+        </h1>
+        <p className="max-w-2xl text-muted">
+          Escolha um simulado, entenda seus erros e acompanhe sua evolução. Um dia
+          de cada vez.
+        </p>
+        <div className="flex flex-wrap gap-3 pt-2">
+          <ButtonLink href="/simulado" size="lg">
+            Começar simulado 🚀
+          </ButtonLink>
+          <ButtonLink href="/revisar-erros" variant="secondary" size="lg">
+            Revisar meus erros
+          </ButtonLink>
         </div>
-      </div>
+      </section>
 
-      {/* Grid de Recursos / Cards Estilo Google */}
-      <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
-        <Link
-          href="/simulado"
-          className="group relative rounded-3xl border border-slate-200/80 bg-white p-8 shadow-sm transition-all duration-300 hover:border-indigo-300 hover:shadow-xl hover:shadow-indigo-500/5 hover:-translate-y-1 space-y-4"
-        >
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-50 text-2xl transition-transform group-hover:scale-110">
-            📝
-          </div>
-          <h2 className="text-lg font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">
-            Simulado Inteligente
-          </h2>
-          <p className="text-sm text-slate-500 leading-relaxed">
-            Resolva questões filtradas por matéria ou tópico com cronômetro integrado e registro analítico de erros.
-          </p>
-        </Link>
+      {/* Cards de status */}
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <EnemCountdown />
 
-        <Link
-          href="/estatisticas"
-          className="group relative rounded-3xl border border-slate-200/80 bg-white p-8 shadow-sm transition-all duration-300 hover:border-indigo-300 hover:shadow-xl hover:shadow-indigo-500/5 hover:-translate-y-1 space-y-4"
-        >
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-2xl transition-transform group-hover:scale-110">
-            📊
+        <Card className="p-5 sm:p-6">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-bold uppercase tracking-wider text-faint">
+              Meta de hoje
+            </p>
+            {hydrated && goalDone ? <Badge tone="ok">✅ concluída</Badge> : null}
           </div>
-          <h2 className="text-lg font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">
-            Painel de Desempenho
-          </h2>
-          <p className="text-sm text-slate-500 leading-relaxed">
-            Métricas executivas detalhadas por assunto, taxa de acertos e motivos de falha mapeados para correção rápida.
+          <p className="mt-1 flex items-baseline gap-1.5">
+            <span className="text-4xl font-extrabold tabular-nums text-text">
+              {hydrated ? stats.todayCount : 0}
+            </span>
+            <span className="text-lg font-semibold text-muted">
+              / {settings.dailyGoal}
+            </span>
           </p>
-        </Link>
+          <ProgressBar
+            className="mt-3"
+            value={goalPct}
+            tone={goalDone ? "ok" : "primary"}
+          />
+          <p className="mt-2 text-xs text-muted">
+            {goalDone
+              ? "Meta batida! Cada dia desses conta muito. 💛"
+              : `Faltam ${Math.max(0, settings.dailyGoal - stats.todayCount)} questões pra fechar o dia.`}
+          </p>
+        </Card>
 
-        <Link
-          href="/favoritas"
-          className="group relative rounded-3xl border border-slate-200/80 bg-white p-8 shadow-sm transition-all duration-300 hover:border-indigo-300 hover:shadow-xl hover:shadow-indigo-500/5 hover:-translate-y-1 space-y-4"
-        >
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-2xl transition-transform group-hover:scale-110">
-            ⭐
-          </div>
-          <h2 className="text-lg font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">
-            Caderno de Favoritas
-          </h2>
-          <p className="text-sm text-slate-500 leading-relaxed">
-            Acesse instantaneamente questões marcadas com estrela para revisões estratégicas antes da prova.
+        <Card className="p-5 sm:p-6">
+          <p className="text-xs font-bold uppercase tracking-wider text-faint">
+            Sequência
           </p>
-        </Link>
-      </div>
+          <p className="mt-1 flex items-baseline gap-1.5">
+            <span className="text-4xl font-extrabold tabular-nums text-text">
+              {hydrated ? stats.streak : 0}
+            </span>
+            <span className="text-lg font-semibold text-muted">
+              {stats.streak === 1 ? "dia" : "dias"} 🔥
+            </span>
+          </p>
+          <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+            <div>
+              <p className="text-lg font-bold text-primary">{hydrated ? stats.accuracy : 0}%</p>
+              <p className="text-[11px] text-faint">acerto</p>
+            </div>
+            <div>
+              <p className="text-lg font-bold text-text">{hydrated ? stats.totalAttempts : 0}</p>
+              <p className="text-[11px] text-faint">questões</p>
+            </div>
+            <div>
+              <p className="text-lg font-bold text-text">{hydrated ? stats.activeDays : 0}</p>
+              <p className="text-[11px] text-faint">dias ativos</p>
+            </div>
+          </div>
+        </Card>
+      </section>
+
+      {/* Grid de recursos */}
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {FEATURES.map((f) => (
+          <Link
+            key={f.href}
+            href={f.href}
+            className="group rounded-2xl border border-border bg-surface p-6 shadow-[var(--shadow)] transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40"
+          >
+            <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-surface-2 text-xl transition-transform group-hover:scale-110">
+              {f.icon}
+            </div>
+            <h2 className="font-bold text-text group-hover:text-primary">
+              {f.title}
+            </h2>
+            <p className="mt-1 text-sm text-muted">{f.desc}</p>
+          </Link>
+        ))}
+      </section>
+
+      {hydrated && stats.totalQuestions === 0 ? (
+        <Card className="border-dashed p-6 text-center">
+          <p className="font-semibold text-text">Seu banco de questões está vazio.</p>
+          <p className="mt-1 text-sm text-muted">
+            Cadastre questões manualmente ou importe um PDF de prova — a IA organiza tudo.
+          </p>
+          <ButtonLink href="/admin/nova-questao" variant="secondary" className="mt-4">
+            Adicionar questões
+          </ButtonLink>
+        </Card>
+      ) : null}
     </div>
   );
 }

@@ -1,124 +1,185 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
+import { clearAttempts, deleteAttempt, useAppData, useHydrated } from "@/lib/store";
+import { ENEM_AREAS, areaShort } from "@/lib/enem";
+import { ERROR_REASONS } from "@/types";
+import { cn } from "@/lib/cn";
+import {
+  Badge,
+  Button,
+  ButtonLink,
+  Card,
+  EmptyState,
+  PageHeader,
+  selectClass,
+} from "@/components/ui";
+
+const PAGE_SIZE = 20;
 
 export default function HistoricoPage() {
-  const [history, setHistory] = useState<any[]>([]);
-  const [filter, setFilter] = useState<string>("TODOS");
-  const [searchTerm, setSearchTerm] = useState<string>("");
+  const hydrated = useHydrated();
+  const { attempts } = useAppData();
+  const [search, setSearch] = useState("");
+  const [area, setArea] = useState("TODAS");
+  const [result, setResult] = useState<"TODOS" | "acertos" | "erros">("TODOS");
+  const [reason, setReason] = useState("TODOS");
+  const [period, setPeriod] = useState<"TODOS" | "hoje" | "7" | "30">("TODOS");
+  const [page, setPage] = useState(1);
 
-  useEffect(() => {
-    const savedHistory = JSON.parse(localStorage.getItem("estudos_amor_history") || "[]");
-    // Ordena do mais recente para o mais antigo
-    setHistory(savedHistory.reverse());
-  }, []);
+  const filtered = useMemo(() => {
+    const s = search.trim().toLowerCase();
+    const now = new Date().getTime();
+    return [...attempts]
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .filter((a) => {
+        if (s && !a.statement.toLowerCase().includes(s)) return false;
+        if (area !== "TODAS" && a.subject !== area) return false;
+        if (result === "acertos" && !a.isCorrect) return false;
+        if (result === "erros" && a.isCorrect) return false;
+        if (reason !== "TODOS" && a.reason !== reason) return false;
+        if (period !== "TODOS") {
+          const days = (now - new Date(a.createdAt).getTime()) / 86_400_000;
+          if (period === "hoje" && days >= 1) return false;
+          if (period === "7" && days > 7) return false;
+          if (period === "30" && days > 30) return false;
+        }
+        return true;
+      });
+  }, [attempts, search, area, result, reason, period]);
 
-  const handleClearHistory = () => {
-    localStorage.removeItem("estudos_amor_history");
-    setHistory([]);
-  };
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const shown = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  // Filtragem por período e busca por palavra-chave
-  const filteredHistory = history.filter((item) => {
-    // Filtro de busca por palavra-chave no enunciado
-    const matchesSearch = item.statement.toLowerCase().includes(searchTerm.toLowerCase());
-    if (!matchesSearch) return false;
-
-    // Filtro de período
-    if (filter === "TODOS") return true;
-
-    const itemDate = new Date(item.date);
-    const now = new Date();
-    const diffTime = now.getTime() - itemDate.getTime();
-    const diffDays = diffTime / (1000 * 3600 * 24);
-
-    if (filter === "HOJE") {
-      return diffDays < 1 && itemDate.getDate() === now.getDate();
-    }
-    if (filter === "7DIAS") {
-      return diffDays <= 7;
-    }
-    if (filter === "30DIAS") {
-      return diffDays <= 30;
-    }
-    return true;
-  });
+  if (hydrated && attempts.length === 0) {
+    return (
+      <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+        <PageHeader title="Histórico 🕘" subtitle="Tudo que você já respondeu." />
+        <EmptyState
+          icon="📝"
+          title="Nada por aqui ainda"
+          description="Responda questões nos simulados pra preencher seu histórico."
+          action={<ButtonLink href="/simulado">Fazer um simulado</ButtonLink>}
+        />
+      </div>
+    );
+  }
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6">
-      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-800 sm:text-3xl">Histórico de Simulados 📚</h1>
-          <p className="text-xs text-slate-500 sm:text-sm">Registro de todas as questões respondidas</p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            type="text"
-            placeholder="Buscar palavra-chave..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 shadow-sm outline-none placeholder:text-slate-400 focus:border-blue-400"
-          />
-
-          <select
-            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm outline-none"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
+    <div className="mx-auto max-w-4xl space-y-5 px-4 py-8 sm:px-6">
+      <PageHeader
+        title="Histórico 🕘"
+        subtitle={`${attempts.length} respostas registradas`}
+        action={
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={() => {
+              if (confirm("Apagar TODO o histórico, sessões e progresso de revisão? Isso não dá pra desfazer.")) {
+                clearAttempts();
+              }
+            }}
           >
-            <option value="TODOS">Todo o Período</option>
-            <option value="HOJE">Hoje</option>
-            <option value="7DIAS">Últimos 7 dias</option>
-            <option value="30DIAS">Últimos 30 dias</option>
-          </select>
+            Limpar tudo
+          </Button>
+        }
+      />
 
-          {history.length > 0 && (
-            <button
-              onClick={handleClearHistory}
-              className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-100 shadow-sm"
-            >
-              Limpar
-            </button>
-          )}
-        </div>
-      </div>
+      <Card className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+        <input
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(1);
+          }}
+          placeholder="Buscar no enunciado…"
+          className="rounded-xl border border-border-strong bg-surface px-3 py-2 text-sm text-text outline-none focus:border-primary sm:col-span-2 lg:col-span-1"
+        />
+        <select className={selectClass} value={area} onChange={(e) => { setArea(e.target.value); setPage(1); }}>
+          <option value="TODAS">Todas as áreas</option>
+          {ENEM_AREAS.map((a) => (
+            <option key={a.id} value={a.name}>{a.short}</option>
+          ))}
+        </select>
+        <select className={selectClass} value={result} onChange={(e) => { setResult(e.target.value as typeof result); setPage(1); }}>
+          <option value="TODOS">Acertos e erros</option>
+          <option value="acertos">Só acertos</option>
+          <option value="erros">Só erros</option>
+        </select>
+        <select className={selectClass} value={reason} onChange={(e) => { setReason(e.target.value); setPage(1); }}>
+          <option value="TODOS">Qualquer motivo</option>
+          {ERROR_REASONS.map((r) => (
+            <option key={r} value={r}>{r}</option>
+          ))}
+        </select>
+        <select className={selectClass} value={period} onChange={(e) => { setPeriod(e.target.value as typeof period); setPage(1); }}>
+          <option value="TODOS">Todo o período</option>
+          <option value="hoje">Hoje</option>
+          <option value="7">Últimos 7 dias</option>
+          <option value="30">Últimos 30 dias</option>
+        </select>
+      </Card>
 
-      {history.length === 0 ? (
-        <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-white p-8 text-center shadow-sm sm:p-12">
-          <p className="text-base font-medium text-slate-600 sm:text-lg">Nenhum histórico encontrado.</p>
-          <p className="mt-1 text-xs text-slate-400 sm:text-sm">Responda questões no simulado para preencher seu histórico!</p>
-        </div>
-      ) : filteredHistory.length === 0 ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-          <p className="text-sm font-medium text-slate-600">Nenhum registro encontrado para os filtros aplicados.</p>
-        </div>
+      {filtered.length === 0 ? (
+        <Card className="p-8 text-center text-sm text-muted">
+          Nenhum registro pra esses filtros.
+        </Card>
       ) : (
-        <div className="space-y-4">
-          {filteredHistory.map((item, index) => (
-            <div 
-              key={index} 
-              className={`flex flex-col gap-3 rounded-2xl border bg-white p-4 sm:p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between ${
-                item.isCorrect ? 'border-emerald-200' : 'border-red-200'
-              }`}
+        <div className="space-y-2.5">
+          {shown.map((a) => (
+            <Card
+              key={a.id}
+              className={cn(
+                "flex items-start gap-3 p-4",
+                a.isCorrect ? "border-l-4 border-l-ok" : "border-l-4 border-l-bad",
+              )}
             >
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-bold ${
-                    item.isCorrect ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
-                  }`}>
-                    {item.isCorrect ? "✅ Acertou" : "❌ Errou"}
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge tone={a.isCorrect ? "ok" : "bad"}>
+                    {a.isCorrect ? "✅ acertou" : "❌ errou"}
+                  </Badge>
+                  <span className="text-xs text-faint">
+                    {new Date(a.createdAt).toLocaleString("pt-BR", {
+                      day: "2-digit",
+                      month: "2-digit",
+                      year: "2-digit",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
                   </span>
-                  <span className="text-xs text-slate-400">
-                    {item.date ? new Date(item.date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : "Data não informada"}
-                  </span>
+                  <span className="text-xs text-faint">· {areaShort(a.subject)}</span>
                 </div>
-                <p className="text-sm font-medium text-slate-800 line-clamp-2">{item.statement}</p>
-                <p className="text-xs text-slate-500">
-                  Sua resposta: <strong className="font-bold">{item.selected}</strong> | Correta: <strong className="font-bold">{item.correct}</strong>
+                <p className="mt-1 line-clamp-2 text-sm text-text">{a.statement}</p>
+                <p className="mt-0.5 text-xs text-muted">
+                  Respondeu <strong>{a.userAnswer || "—"}</strong>
+                  {" · "}gabarito <strong>{a.correctAnswer || "?"}</strong>
+                  {a.reason ? ` · ${a.reason}` : ""}
                 </p>
               </div>
-            </div>
+              <button
+                onClick={() => deleteAttempt(a.id)}
+                aria-label="Excluir registro"
+                className="shrink-0 rounded-lg p-1.5 text-faint transition hover:bg-surface-2 hover:text-bad"
+              >
+                🗑️
+              </button>
+            </Card>
           ))}
+
+          {pageCount > 1 ? (
+            <div className="flex items-center justify-center gap-3 pt-3">
+              <Button variant="secondary" size="sm" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>
+                ← Anterior
+              </Button>
+              <span className="text-xs font-semibold text-muted">
+                {page} / {pageCount}
+              </span>
+              <Button variant="secondary" size="sm" disabled={page === pageCount} onClick={() => setPage((p) => p + 1)}>
+                Próxima →
+              </Button>
+            </div>
+          ) : null}
         </div>
       )}
     </div>

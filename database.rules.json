@@ -1,0 +1,8 @@
+{
+  "rules": {
+    "valessa": {
+      ".read": true,
+      ".write": true
+    }
+  }
+}

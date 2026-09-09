@@ -1,36 +1,67 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Estudos do Amor ❤️
 
-## Getting Started
+Plataforma de estudos para o ENEM: simulados cronometrados (treino ou prova),
+revisão espaçada dos erros, favoritas, acompanhamento de desempenho com gráficos,
+contagem regressiva pra prova, metas diárias, modo escuro e PWA (dá pra instalar no
+celular).
 
-First, run the development server:
+## Stack
+
+- **Next.js 16** (App Router, Turbopack) + **React 19**
+- **Tailwind CSS v4** com tokens semânticos e tema claro/escuro
+- **Recharts** para os gráficos de desempenho
+- **Groq (Llama)** para extrair questões de PDFs de prova
+- Dados em **localStorage** (offline-first) espelhados no **Firebase Realtime
+  Database** quando configurado — sincroniza entre celular e computador
+
+## Rodando localmente
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Abra http://localhost:3000.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Variáveis de ambiente (`.env.local`)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+GROQ_API_KEY=...
 
-## Learn More
+# Sincronização na nuvem (opcional — sem isso o app roda só neste aparelho)
+NEXT_PUBLIC_FIREBASE_API_KEY=...
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=...
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=...
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=...
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=...
+NEXT_PUBLIC_FIREBASE_APP_ID=...
+NEXT_PUBLIC_FIREBASE_DATABASE_URL=https://<projeto>-default-rtdb.firebaseio.com
+```
 
-To learn more about Next.js, take a look at the following resources:
+### Regras do Realtime Database
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+O app grava tudo no nó `valessa/`. Publique `database.rules.json`:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+firebase deploy --only database
+```
 
-## Deploy on Vercel
+ou cole o conteúdo no console do Firebase → Realtime Database → Regras.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Estrutura
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Caminho | O quê |
+|---|---|
+| `src/lib/store.ts` | Camada de dados única (localStorage + sync RTDB, hooks) |
+| `src/lib/stats.ts` | Métricas derivadas e fila de revisão espaçada |
+| `src/lib/enem.ts` | Áreas e assuntos do ENEM (fonte única) |
+| `src/lib/messages.ts` | Mensagens de incentivo |
+| `src/components/ui.tsx` | Design system (Card, Button, Badge, …) |
+| `src/components/simulado/` | Motor do simulado |
+| `src/app/` | Páginas (App Router) |
+
+## Deploy (Vercel)
+
+1. Configure as variáveis de ambiente acima no projeto da Vercel.
+2. `vercel --prod` (ou push na branch conectada).
+3. Publique as regras do Realtime Database.

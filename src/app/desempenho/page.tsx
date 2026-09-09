@@ -1,242 +1,186 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { calculateAccuracy, formatTime, getUniqueQuestionsCount } from "@/lib/utils";
-
-const ENEM_MATERIAS = [
-  "Matemática e suas Tecnologias",
-  "Linguagens, Códigos e suas Tecnologias",
-  "Ciências Humanas e suas Tecnologias",
-  "Ciências da Natureza e suas Tecnologias",
-];
+import Link from "next/link";
+import { useHydrated, useSettings } from "@/lib/store";
+import { useStats } from "@/lib/stats";
+import {
+  AreaBarChart,
+  ReasonPieChart,
+  TimelineChart,
+} from "@/components/PerformanceCharts";
+import { formatTime } from "@/lib/utils";
+import {
+  Badge,
+  ButtonLink,
+  Card,
+  EmptyState,
+  PageHeader,
+  ProgressBar,
+  StatCard,
+} from "@/components/ui";
 
 export default function DesempenhoPage() {
-  const [history, setHistory] = useState<any[]>([]);
-  const [questions, setQuestions] = useState<any[]>([]);
+  const hydrated = useHydrated();
+  const stats = useStats();
+  const [settings] = useSettings();
 
-  useEffect(() => {
-    const savedHistory = JSON.parse(localStorage.getItem("estudos_amor_history") || "[]");
-    const savedQuestions = JSON.parse(localStorage.getItem("estudos_amor_questions") || "[]");
-    setHistory(savedHistory);
-    setQuestions(savedQuestions);
-  }, []);
+  if (hydrated && stats.totalAttempts === 0) {
+    return (
+      <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+        <PageHeader title="Desempenho 📊" subtitle="Sua evolução, ponto a ponto." />
+        <EmptyState
+          icon="📈"
+          title="Ainda não há dados"
+          description="Faça um simulado pra começar a ver seus gráficos de acerto, evolução e pontos a revisar."
+          action={<ButtonLink href="/simulado">Fazer um simulado</ButtonLink>}
+        />
+      </div>
+    );
+  }
 
-  const totalAttempts = history.length;
-  const correctAttempts = history.filter((h) => h.isCorrect).length;
-  const incorrectAttempts = totalAttempts - correctAttempts;
-  const accuracy = calculateAccuracy(history);
-  const uniqueAnswered = getUniqueQuestionsCount(history);
-  const totalRegisteredQuestions = questions.length;
-  
-  const progressPercentage = totalRegisteredQuestions > 0 
-    ? Math.round((uniqueAnswered / totalRegisteredQuestions) * 100) 
+  const goalPct = settings.dailyGoal
+    ? Math.round((stats.todayCount / settings.dailyGoal) * 100)
     : 0;
 
-  // Estatísticas por matéria
-  const subjectStats = ENEM_MATERIAS.map((subjectName) => {
-    const subjectQuestionStatements = new Set(
-      questions.filter((q) => q.subject === subjectName).map((q) => q.statement)
-    );
-
-    const subjectAttempts = history.filter((h) => subjectQuestionStatements.has(h.statement));
-    const subTotal = subjectAttempts.length;
-    const subCorrect = subjectAttempts.filter((h) => h.isCorrect).length;
-    const subAccuracy = subTotal > 0 ? Math.round((subCorrect / subTotal) * 100) : 0;
-
-    return {
-      name: subjectName,
-      total: subTotal,
-      correct: subCorrect,
-      accuracy: subAccuracy,
-    };
-  });
-
-  // Estatísticas por assunto específico (topic)
-  const topicMap: { [topicName: string]: { total: number; correct: number; subject: string } } = {};
-  
-  // Mapeia cada enunciado ao seu respectivo tópico e matéria
-  const questionTopicMap = new Map<string, { topic: string; subject: string }>();
-  questions.forEach((q) => {
-    if (q.statement && q.topic) {
-      questionTopicMap.set(q.statement, { topic: q.topic, subject: q.subject });
-    }
-  });
-
-  history.forEach((h) => {
-    const qInfo = questionTopicMap.get(h.statement);
-    if (qInfo && qInfo.topic) {
-      if (!topicMap[qInfo.topic]) {
-        topicMap[qInfo.topic] = { total: 0, correct: 0, subject: qInfo.subject };
-      }
-      topicMap[qInfo.topic].total += 1;
-      if (h.isCorrect) {
-        topicMap[qInfo.topic].correct += 1;
-      }
-    }
-  });
-
-  const topicStats = Object.keys(topicMap).map((topicName) => {
-    const data = topicMap[topicName];
-    return {
-      topic: topicName,
-      subject: data.subject,
-      total: data.total,
-      correct: data.correct,
-      accuracy: Math.round((data.correct / data.total) * 100),
-    };
-  }).sort((a, b) => b.total - a.total); // Ordena pelos mais praticados
-
-  // Agrupamento temporal para evolução
-  const sortedHistory = [...history].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  const timelineMap: { [dateStr: string]: { total: number; correct: number } } = {};
-  
-  sortedHistory.forEach((h) => {
-    if (!h.date) return;
-    const dateStr = new Date(h.date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-    if (!timelineMap[dateStr]) {
-      timelineMap[dateStr] = { total: 0, correct: 0 };
-    }
-    timelineMap[dateStr].total += 1;
-    if (h.isCorrect) {
-      timelineMap[dateStr].correct += 1;
-    }
-  });
-
-  const timelineData = Object.keys(timelineMap).map((dateStr) => {
-    const data = timelineMap[dateStr];
-    return {
-      date: dateStr,
-      accuracy: Math.round((data.correct / data.total) * 100),
-      total: data.total,
-    };
-  }).slice(-7);
+  const strongest = stats.byTopic.filter((t) => t.total >= 3).at(-1);
+  const weakest = stats.byTopic.filter((t) => t.total >= 3)[0];
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6">
-      <div className="mb-8">
-        <h1 className="text-2xl font-extrabold text-slate-800 sm:text-3xl">Desempenho Geral 📊</h1>
-        <p className="text-xs text-slate-500 sm:text-sm">Acompanhe suas estatísticas de estudo e evolução nos simulados</p>
+    <div className="mx-auto max-w-4xl space-y-6 px-4 py-8 sm:px-6">
+      <PageHeader
+        title="Desempenho 📊"
+        subtitle="Sua evolução, ponto a ponto."
+        action={<ButtonLink href="/simulado" size="sm">Novo simulado</ButtonLink>}
+      />
+
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard
+          label="Aproveitamento"
+          value={`${stats.accuracy}%`}
+          hint={`${stats.correct} acertos · ${stats.incorrect} erros`}
+        />
+        <StatCard
+          label="Questões únicas"
+          value={stats.uniqueAnswered}
+          hint={`${stats.coverage}% do banco (${stats.totalQuestions})`}
+          tone="neutral"
+        />
+        <StatCard
+          label="Sequência"
+          value={`${stats.streak} 🔥`}
+          hint={`${stats.activeDays} dias ativos`}
+          tone="accent"
+        />
+        <StatCard
+          label="Tempo médio"
+          value={stats.avgTime ? formatTime(stats.avgTime) : "—"}
+          hint="por questão"
+          tone="neutral"
+        />
       </div>
 
-      {totalAttempts === 0 ? (
-        <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-white p-8 text-center shadow-sm sm:p-12">
-          <p className="text-base font-medium text-slate-600 sm:text-lg">Nenhum dado de desempenho registrado ainda.</p>
-          <p className="mt-1 text-xs text-slate-400 sm:text-sm">Responda questões no simulado para visualizar suas estatísticas detalhadas!</p>
+      {/* meta */}
+      <Card className="p-5">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-bold text-text">Meta de hoje</h2>
+          <span className="text-sm font-semibold text-muted">
+            {stats.todayCount} / {settings.dailyGoal}
+          </span>
         </div>
-      ) : (
-        <div className="space-y-6">
-          {/* Cards de Métricas Principais */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Taxa de Acerto</p>
-              <p className="mt-2 text-3xl font-extrabold text-blue-600">{accuracy}%</p>
-              <p className="mt-1 text-xs text-slate-500">{correctAttempts} acertos de {totalAttempts} respostas</p>
-            </div>
+        <ProgressBar
+          className="mt-3"
+          value={goalPct}
+          tone={stats.todayCount >= settings.dailyGoal ? "ok" : "primary"}
+        />
+      </Card>
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Questões Respondidas</p>
-              <p className="mt-2 text-3xl font-extrabold text-slate-800">{uniqueAnswered}</p>
-              <p className="mt-1 text-xs text-slate-500">De um total de {totalRegisteredQuestions} cadastradas</p>
-            </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card className="p-5">
+          <h2 className="mb-3 text-sm font-bold text-text">Evolução do acerto</h2>
+          <TimelineChart data={stats.timeline} />
+        </Card>
+        <Card className="p-5">
+          <h2 className="mb-3 text-sm font-bold text-text">Acerto por área</h2>
+          <AreaBarChart data={stats.byArea} />
+        </Card>
+      </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Erros Registrados</p>
-              <p className="mt-2 text-3xl font-extrabold text-red-600">{incorrectAttempts}</p>
-              <p className="mt-1 text-xs text-slate-500">Disponíveis na aba de revisão</p>
-            </div>
-          </div>
-
-          {/* Gráfico de Evolução Temporal */}
-          {timelineData.length > 0 && (
-            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h2 className="mb-4 text-base font-bold text-slate-800">Evolução Temporal da Taxa de Acerto 📈</h2>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-7">
-                {timelineData.map((item) => (
-                  <div key={item.date} className="flex flex-col items-center justify-end rounded-xl border border-slate-100 bg-slate-50 p-3 text-center">
-                    <span className="text-xs font-bold text-blue-600">{item.accuracy}%</span>
-                    <div className="my-2 h-20 w-3 rounded-full bg-slate-200 relative overflow-hidden flex items-end">
-                      <div 
-                        className="w-full bg-blue-600 rounded-full transition-all duration-500" 
-                        style={{ height: `${item.accuracy}%` }}
-                      />
-                    </div>
-                    <span className="text-[11px] font-medium text-slate-600">{item.date}</span>
-                    <span className="text-[10px] text-slate-400">{item.total} resp.</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Desempenho por Matéria */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="mb-4 text-base font-bold text-slate-800">Desempenho por Matéria 🎯</h2>
-            <div className="space-y-5">
-              {subjectStats.map((sub) => (
-                <div key={sub.name} className="space-y-2">
-                  <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between text-sm">
-                    <span className="font-semibold text-slate-700">{sub.name}</span>
-                    <span className="text-xs font-medium text-slate-500">
-                      {sub.correct}/{sub.total} acertos (<strong className="text-blue-600">{sub.accuracy}%</strong>)
-                    </span>
-                  </div>
-                  <div className="h-3 w-full overflow-hidden rounded-full bg-slate-100">
-                    <div 
-                      className="h-full bg-blue-600 transition-all duration-500 rounded-full" 
-                      style={{ width: `${sub.accuracy}%` }}
-                    />
-                  </div>
-                </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card className="p-5">
+          <h2 className="mb-3 text-sm font-bold text-text">Motivos dos erros</h2>
+          <ReasonPieChart data={stats.byReason} />
+          {stats.byReason.length > 0 ? (
+            <ul className="mt-3 space-y-1 text-xs text-muted">
+              {stats.byReason.map((r) => (
+                <li key={r.reason} className="flex justify-between">
+                  <span>{r.reason}</span>
+                  <span className="font-semibold text-text">{r.count}</span>
+                </li>
               ))}
-            </div>
-          </div>
+            </ul>
+          ) : null}
+        </Card>
 
-          {/* Desempenho por Assunto Específico */}
-          {topicStats.length > 0 && (
-            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h2 className="mb-4 text-base font-bold text-slate-800">Desempenho por Assunto Específico 🔎</h2>
-              <div className="space-y-4">
-                {topicStats.map((top) => (
-                  <div key={top.topic} className="space-y-1.5 rounded-xl border border-slate-100 bg-slate-50 p-4">
-                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between text-sm">
-                      <div>
-                        <span className="font-bold text-slate-800">{top.topic}</span>
-                        <span className="ml-2 text-xs text-slate-400">({top.subject})</span>
-                      </div>
-                      <span className="text-xs font-semibold text-slate-600">
-                        {top.correct}/{top.total} acertos (<strong className="text-blue-600">{top.accuracy}%</strong>)
-                      </span>
-                    </div>
-                    <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-200">
-                      <div 
-                        className="h-full bg-emerald-600 transition-all duration-500 rounded-full" 
-                        style={{ width: `${top.accuracy}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
+        <Card className="p-5">
+          <h2 className="mb-3 text-sm font-bold text-text">Pontos fortes e fracos</h2>
+          {weakest ? (
+            <div className="space-y-3 text-sm">
+              <div>
+                <Badge tone="bad">A revisar</Badge>
+                <p className="mt-1 font-semibold text-text">{weakest.topic}</p>
+                <p className="text-xs text-muted">
+                  {weakest.accuracy}% de acerto em {weakest.total} questões
+                </p>
               </div>
+              {strongest && strongest.topic !== weakest.topic ? (
+                <div>
+                  <Badge tone="ok">Mandando bem</Badge>
+                  <p className="mt-1 font-semibold text-text">{strongest.topic}</p>
+                  <p className="text-xs text-muted">
+                    {strongest.accuracy}% de acerto em {strongest.total} questões
+                  </p>
+                </div>
+              ) : null}
             </div>
+          ) : (
+            <p className="text-sm text-muted">
+              Responda mais questões (pelo menos 3 por assunto) pra gente identificar padrões.
+            </p>
           )}
+        </Card>
+      </div>
 
-          {/* Barra de Progresso Geral */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="mb-2 flex items-center justify-between text-sm">
-              <span className="font-semibold text-slate-700">Cobertura do Banco de Questões</span>
-              <span className="font-bold text-blue-600">{progressPercentage}%</span>
-            </div>
-            <div className="h-3 w-full overflow-hidden rounded-full bg-slate-100">
-              <div 
-                className="h-full bg-emerald-500 transition-all duration-500 rounded-full" 
-                style={{ width: `${Math.min(progressPercentage, 100)}%` }}
+      {/* por assunto */}
+      <Card className="p-5">
+        <h2 className="mb-4 text-sm font-bold text-text">
+          Todos os assuntos <span className="font-normal text-faint">(pior → melhor)</span>
+        </h2>
+        <div className="space-y-3">
+          {stats.byTopic.map((t) => (
+            <div key={t.topic}>
+              <div className="mb-1 flex items-baseline justify-between gap-3 text-sm">
+                <span className="font-medium text-text">{t.topic}</span>
+                <span className="shrink-0 text-xs text-muted">
+                  {t.correct}/{t.total} · <strong className="text-text">{t.accuracy}%</strong>
+                </span>
+              </div>
+              <ProgressBar
+                value={t.accuracy}
+                tone={t.accuracy >= 70 ? "ok" : t.accuracy >= 40 ? "primary" : "warn"}
               />
             </div>
-            <p className="mt-2 text-xs text-slate-400">
-              Você já treinou {uniqueAnswered} questões diferentes do seu banco total de {totalRegisteredQuestions}.
-            </p>
-          </div>
+          ))}
+          {stats.byTopic.length === 0 ? (
+            <p className="text-sm text-muted">Nenhum assunto registrado ainda.</p>
+          ) : null}
         </div>
-      )}
+      </Card>
+
+      <p className="text-center text-xs text-faint">
+        <Link href="/historico" className="hover:text-muted">
+          Ver histórico completo →
+        </Link>
+      </p>
     </div>
   );
 }

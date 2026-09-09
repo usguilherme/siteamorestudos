@@ -1,100 +1,160 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { markReviewed, useHydrated } from "@/lib/store";
+import { useReviewQueue } from "@/lib/stats";
+import { areaShort } from "@/lib/enem";
+import { cn } from "@/lib/cn";
+import {
+  Badge,
+  Button,
+  ButtonLink,
+  Card,
+  EmptyState,
+  PageHeader,
+} from "@/components/ui";
 
 export default function RevisarErrosPage() {
-  const [errorQuestions, setErrorQuestions] = useState<any[]>([]);
-  const [hasErrors, setHasErrors] = useState(false);
+  const hydrated = useHydrated();
+  const queue = useReviewQueue();
+  const [showRecovered, setShowRecovered] = useState(false);
+  const [revealed, setRevealed] = useState<Set<string>>(new Set());
 
-  useEffect(() => {
-    loadErrors();
-  }, []);
+  const due = queue.filter((i) => i.status === "due");
+  const scheduled = queue.filter((i) => i.status === "scheduled");
+  const recovered = queue.filter((i) => i.status === "recovered");
 
-  const loadErrors = () => {
-    const savedHistory = JSON.parse(localStorage.getItem("estudos_amor_history") || "[]");
-    const allQuestions = JSON.parse(localStorage.getItem("estudos_amor_questions") || "[]");
+  const visible = [
+    ...due,
+    ...scheduled,
+    ...(showRecovered ? recovered : []),
+  ];
 
-    const wrongStatements = savedHistory
-      .filter((item: any) => !item.isCorrect)
-      .map((item: any) => item.statement);
-
-    const uniqueStatements = Array.from(new Set(wrongStatements));
-    const filtered = allQuestions.filter((q: any) => uniqueStatements.includes(q.statement));
-    
-    setErrorQuestions(filtered);
-    setHasErrors(savedHistory.some((item: any) => !item.isCorrect));
-  };
-
-  const clearErrorsHistory = () => {
-    const savedHistory = JSON.parse(localStorage.getItem("estudos_amor_history") || "[]");
-    const onlyCorrect = savedHistory.filter((item: any) => item.isCorrect);
-    localStorage.setItem("estudos_amor_history", JSON.stringify(onlyCorrect));
-    setErrorQuestions([]);
-    setHasErrors(false);
-  };
+  if (hydrated && queue.length === 0) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+        <PageHeader title="Revisar erros 🔁" subtitle="O que você errou e ainda não recuperou." />
+        <EmptyState
+          icon="🎯"
+          title="Nada pra revisar — por enquanto"
+          description="Quando você errar questões nos simulados, elas aparecem aqui numa fila de revisão espaçada."
+          action={<ButtonLink href="/simulado">Fazer um simulado</ButtonLink>}
+        />
+      </div>
+    );
+  }
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6">
-      <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-800 sm:text-3xl">Revisão de Erros ❌</h1>
-          <p className="text-xs text-slate-500 sm:text-sm">Questões que você errou nos simulados e precisa treinar novamente</p>
-        </div>
-        
-        <div className="flex items-center gap-3 self-start sm:self-auto">
-          <span className="rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-600">
-            {errorQuestions.length} {errorQuestions.length === 1 ? "erro para revisar" : "erros para revisar"}
-          </span>
-          {hasErrors && (
-            <button
-              onClick={clearErrorsHistory}
-              className="rounded-xl border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-100 shadow-sm"
-            >
-              Limpar Erros
-            </button>
-          )}
-        </div>
+    <div className="mx-auto max-w-3xl space-y-5 px-4 py-8 sm:px-6">
+      <PageHeader
+        title="Revisar erros 🔁"
+        subtitle="Fila de revisão espaçada: revise, e a questão volta mais pra frente."
+        action={
+          due.length > 0 ? (
+            <ButtonLink href="/simulado?source=erradas&auto=1" size="sm">
+              Treinar erros agora
+            </ButtonLink>
+          ) : undefined
+        }
+      />
+
+      <div className="grid grid-cols-3 gap-3">
+        <Card className="p-4 text-center">
+          <p className="text-2xl font-extrabold text-bad">{due.length}</p>
+          <p className="text-xs text-muted">pra revisar hoje</p>
+        </Card>
+        <Card className="p-4 text-center">
+          <p className="text-2xl font-extrabold text-primary">{scheduled.length}</p>
+          <p className="text-xs text-muted">agendadas</p>
+        </Card>
+        <Card className="p-4 text-center">
+          <p className="text-2xl font-extrabold text-ok">{recovered.length}</p>
+          <p className="text-xs text-muted">recuperadas</p>
+        </Card>
       </div>
 
-      {errorQuestions.length === 0 ? (
-        <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-white p-8 text-center shadow-sm sm:p-12">
-          <p className="text-base font-medium text-slate-600 sm:text-lg">Nenhum erro registrado para revisão.</p>
-          <p className="mt-1 text-xs text-slate-400 sm:text-sm">Continue fazendo os simulados para identificar pontos de melhoria!</p>
-        </div>
-      ) : (
-        <div className="space-y-4 sm:space-y-6">
-          {errorQuestions.map((q, index) => (
-            <div key={q.id || index} className="overflow-hidden rounded-2xl border border-red-200 bg-white p-4 shadow-sm sm:p-6">
-              <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <span className="self-start rounded-md bg-red-600 px-3 py-1 text-xs font-semibold text-white shadow-sm">
-                  {q.subject}
+      {recovered.length > 0 ? (
+        <button
+          onClick={() => setShowRecovered((v) => !v)}
+          className="text-xs font-semibold text-muted hover:text-text"
+        >
+          {showRecovered ? "Ocultar" : "Mostrar"} questões recuperadas
+        </button>
+      ) : null}
+
+      <div className="space-y-3">
+        {visible.map((item) => {
+          const q = item.question;
+          const isRevealed = revealed.has(q.id);
+          return (
+            <Card key={q.id} className="p-4">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                {item.status === "due" ? (
+                  <Badge tone="bad">revisar agora</Badge>
+                ) : item.status === "scheduled" ? (
+                  <Badge tone="primary">em {item.dueInDays}d</Badge>
+                ) : (
+                  <Badge tone="ok">✅ recuperada</Badge>
+                )}
+                <span className="text-xs text-muted">
+                  {areaShort(q.subject)} · {q.topic}
                 </span>
-                <span className="text-xs font-medium text-slate-500">{q.topic}</span>
+                <span className="ml-auto text-xs text-faint">
+                  errou {item.errorCount}×
+                  {item.lastReason ? ` · ${item.lastReason}` : ""}
+                </span>
               </div>
 
-              <p className="mb-4 text-sm font-medium text-slate-800 sm:text-base">{q.statement}</p>
+              <p className="whitespace-pre-line text-sm text-text">{q.statement}</p>
 
-              <div className="space-y-2 text-xs sm:text-sm">
-                {q.options.map((opt: any) => {
-                  const isCorrect = opt.letter === q.correctOption;
-                  return (
-                    <div 
-                      key={opt.letter} 
-                      className={`rounded-xl border p-3 transition ${
-                        isCorrect 
-                          ? 'border-emerald-500 bg-emerald-50 font-semibold text-emerald-900' 
-                          : 'border-slate-100 text-slate-700'
-                      }`}
+              {isRevealed ? (
+                <div className="mt-2 space-y-1 text-sm">
+                  {q.options.map((o) => (
+                    <div
+                      key={o.letter}
+                      className={cn(
+                        "rounded-lg px-2 py-1",
+                        o.letter === q.correctOption
+                          ? "bg-[var(--ok-soft)] font-semibold text-ok"
+                          : "text-muted",
+                      )}
                     >
-                      <span className="font-bold">{opt.letter})</span> {opt.text} {isCorrect && "✅ (Correta)"}
+                      <span className="font-bold">{o.letter})</span> {o.text}
                     </div>
-                  );
-                })}
+                  ))}
+                  {q.explanation ? (
+                    <p className="mt-1 rounded-lg bg-surface-2 p-2 text-xs text-muted">
+                      💡 {q.explanation}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() =>
+                    setRevealed((r) => {
+                      const n = new Set(r);
+                      if (n.has(q.id)) n.delete(q.id);
+                      else n.add(q.id);
+                      return n;
+                    })
+                  }
+                >
+                  {isRevealed ? "Ocultar gabarito" : "Ver gabarito"}
+                </Button>
+                {item.status !== "recovered" ? (
+                  <Button size="sm" onClick={() => markReviewed(q.id)}>
+                    Marquei como revisada
+                  </Button>
+                ) : null}
               </div>
-            </div>
-          ))}
-        </div>
-      )}
+            </Card>
+          );
+        })}
+      </div>
     </div>
   );
 }

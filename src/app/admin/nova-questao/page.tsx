@@ -1,360 +1,329 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
-import { QuestionOption } from "@/types";
-import { exportLocalStorageData, importLocalStorageData } from "@/lib/utils";
+import { addQuestion, addQuestions } from "@/lib/store";
+import { ENEM_AREAS, topicsFor } from "@/lib/enem";
+import type { QuestionOption } from "@/types";
+import {
+  Badge,
+  Button,
+  Card,
+  Field,
+  inputClass,
+  selectClass,
+} from "@/components/ui";
+import { cn } from "@/lib/cn";
 
-const ENEM_MATERIAS = [
-  {
-    id: "mat",
-    name: "Matemática e suas Tecnologias",
-    topics: ["Aritmética e Operações Básicas", "Razão, Proporção e Regra de Três", "Porcentagem e Matemática Financeira", "Geometria Plana", "Funções"]
-  },
-  {
-    id: "ling",
-    name: "Linguagens, Códigos e suas Tecnologias",
-    topics: ["Interpretação e Compreensão de Textos", "Funções da Linguagem", "Variação Linguística", "Literatura Brasileira"]
-  },
-  {
-    id: "hum",
-    name: "Ciências Humanas e suas Tecnologias",
-    topics: ["História do Brasil", "História Geral", "Geografia Física e Cartografia", "Sociologia e Filosofia"]
-  },
-  {
-    id: "nat",
-    name: "Ciências da Natureza e suas Tecnologias",
-    topics: ["Mecânica", "Termologia", "Eletrodinâmica", "Química Orgânica", "Citologia e Genética"]
-  }
+const EMPTY_OPTS: QuestionOption[] = [
+  { letter: "A", text: "" },
+  { letter: "B", text: "" },
+  { letter: "C", text: "" },
+  { letter: "D", text: "" },
+  { letter: "E", text: "" },
 ];
 
+type Msg = { kind: "ok" | "err" | "info"; text: string } | null;
+
 export default function NovaQuestaoPage() {
-  const [selectedSubjectId, setSelectedSubjectId] = useState("");
-  const [selectedTopic, setSelectedTopic] = useState("");
+  // manual
+  const [area, setArea] = useState("");
+  const [topic, setTopic] = useState("");
   const [statement, setStatement] = useState("");
-  const [options, setOptions] = useState<QuestionOption[]>([
-    { letter: "A", text: "" },
-    { letter: "B", text: "" },
-    { letter: "C", text: "" },
-    { letter: "D", text: "" },
-    { letter: "E", text: "" },
-  ]);
-  const [correctOption, setCorrectOption] = useState("A");
-  
-  const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState("");
+  const [options, setOptions] = useState<QuestionOption[]>(EMPTY_OPTS);
+  const [correct, setCorrect] = useState("A");
+  const [explanation, setExplanation] = useState("");
+  const [msg, setMsg] = useState<Msg>(null);
 
-  // Estados de IA e PDF Direto
-  const [rawPdfText, setRawPdfText] = useState("");
-  const [isAiLoading, setIsAiLoading] = useState(false);
-  const [aiMsg, setAiMsg] = useState("");
-  const [pdfFileName, setPdfFileName] = useState("");
+  // pdf + ia
+  const [pdfText, setPdfText] = useState("");
+  const [pdfName, setPdfName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [aiMsg, setAiMsg] = useState<Msg>(null);
 
-  const currentSubject = ENEM_MATERIAS.find(s => s.id === selectedSubjectId);
-  const topics = currentSubject ? currentSubject.topics : [];
+  const topics = area ? topicsFor(area) : [];
 
-  const handleOptionChange = (index: number, text: string) => {
-    const newOptions = [...options];
-    newOptions[index].text = text;
-    setOptions(newOptions);
+  const submitManual = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!area || !topic || !statement.trim()) {
+      setMsg({ kind: "err", text: "Preencha área, assunto e enunciado." });
+      return;
+    }
+    if (options.some((o) => !o.text.trim())) {
+      setMsg({ kind: "err", text: "Preencha todas as 5 alternativas." });
+      return;
+    }
+    addQuestion({
+      subject: area,
+      topic,
+      statement: statement.trim(),
+      options: options.map((o) => ({ ...o, text: o.text.trim() })),
+      correctOption: correct,
+      explanation: explanation.trim() || undefined,
+    });
+    setMsg({ kind: "ok", text: "✅ Questão salva!" });
+    setStatement("");
+    setExplanation("");
+    setOptions(EMPTY_OPTS.map((o) => ({ ...o })));
+    setCorrect("A");
   };
 
-  // Função para ler o arquivo PDF enviado e extrair o texto de forma segura para o browser
-  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const readPdf = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    setPdfFileName(file.name);
-    setIsAiLoading(true);
-    setAiMsg("Lendo arquivo PDF...");
-
+    setPdfName(file.name);
+    setBusy(true);
+    setAiMsg({ kind: "info", text: "Lendo o PDF…" });
     try {
-      // Import dinâmico para evitar que o Node.js processe o canvas no SSR
-      const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.js");
-      
+      const pdfjs = await import("pdfjs-dist/legacy/build/pdf.js");
       if (typeof window !== "undefined") {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+        pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
       }
-
-      const arrayBuffer = await file.arrayBuffer();
-      const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
-      const pdfDoc = await loadingTask.promise;
-      
-      let extractedText = "";
-      for (let i = 1; i <= pdfDoc.numPages; i++) {
-        const page = await pdfDoc.getPage(i);
-        const textContent = await page.getTextContent();
-        const pageText = textContent.items.map((item: any) => item.str).join(" ");
-        extractedText += `--- Página ${i} ---\n` + pageText + "\n\n";
+      const buf = await file.arrayBuffer();
+      const doc = await pdfjs.getDocument({ data: buf }).promise;
+      let out = "";
+      for (let i = 1; i <= doc.numPages; i++) {
+        const page = await doc.getPage(i);
+        const content = await page.getTextContent();
+        let lastY: number | null = null;
+        let line = "";
+        const lines: string[] = [];
+        for (const item of content.items) {
+          const y = item.transform[5];
+          if (lastY !== null && Math.abs(y - lastY) > 2) {
+            if (line.trim()) lines.push(line.trim());
+            line = "";
+          }
+          line += item.str + " ";
+          lastY = y;
+        }
+        if (line.trim()) lines.push(line.trim());
+        out += `--- Página ${i} ---\n${lines.join("\n")}\n\n`;
       }
-
-      setRawPdfText(extractedText);
-      setAiMsg("✅ PDF lido com sucesso! Clique em 'Extrair com IA' para estruturar as questões.");
-    } catch (error: any) {
-      setAiMsg(`❌ Erro ao ler PDF: ${error.message}`);
+      setPdfText(out);
+      setAiMsg({ kind: "ok", text: "✅ PDF lido. Agora extraia as questões com a IA." });
+    } catch (err) {
+      setAiMsg({ kind: "err", text: `❌ Erro ao ler o PDF: ${(err as Error).message}` });
     } finally {
-      setIsAiLoading(false);
+      setBusy(false);
     }
   };
 
-  const handleAiExtraction = async () => {
-    if (!rawPdfText.trim()) return;
-
-    setIsAiLoading(true);
-    setAiMsg("A IA está analisando e estruturando as questões...");
-
+  const extractWithAI = async () => {
+    if (!pdfText.trim()) return;
+    setBusy(true);
+    setAiMsg({ kind: "info", text: "A IA está estruturando as questões…" });
     try {
-      const response = await fetch("/api/extrair-questoes", {
+      const res = await fetch("/api/extrair-questoes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: rawPdfText }),
+        body: JSON.stringify({ text: pdfText }),
       });
+      const data: {
+        error?: string;
+        questions?: Array<{
+          statement?: string;
+          options?: Array<{ letter?: string; text?: string }>;
+          correctOption?: string;
+          explanation?: string;
+          possiblyHasImage?: boolean;
+        }>;
+      } = await res.json();
+      if (!res.ok) throw new Error(data.error || "Falha na extração.");
+      const list = (data.questions ?? []).filter(
+        (q) => q.statement && Array.isArray(q.options) && q.options.length >= 2,
+      );
+      if (!list.length) throw new Error("A IA não encontrou questões estruturáveis nesse texto.");
 
-      const data = await response.json();
+      addQuestions(
+        list.map((q) => ({
+          subject: area || "",
+          topic: topic || "",
+          statement: String(q.statement).trim(),
+          options: (q.options ?? []).map((o) => ({
+            letter: String(o.letter || "").toUpperCase().slice(0, 1),
+            text: String(o.text || "").trim(),
+          })),
+          correctOption: String(q.correctOption || "").toUpperCase().slice(0, 1),
+          explanation: q.explanation ? String(q.explanation).trim() : undefined,
+          possiblyHasImage: !!q.possiblyHasImage,
+          source: pdfName || undefined,
+        })),
+      );
 
-      if (!response.ok) {
-        throw new Error(data.error || "Erro ao processar com IA.");
-      }
-
-      if (data.questions && Array.isArray(data.questions)) {
-        const existingQuestions = JSON.parse(localStorage.getItem("estudos_amor_questions") || "[]");
-        
-        const formattedNewQuestions = data.questions.map((q: any, idx: number) => ({
-          ...q,
-          id: `${Date.now()}-${idx}`,
-          createdAt: new Date().toISOString()
-        }));
-
-        const updatedQuestions = [...existingQuestions, ...formattedNewQuestions];
-        localStorage.setItem("estudos_amor_questions", JSON.stringify(updatedQuestions));
-
-        setAiMsg(`✨ Sucesso! ${formattedNewQuestions.length} questões foram extraídas do PDF e salvas automaticamente.`);
-        setRawPdfText("");
-        setPdfFileName("");
-      } else {
-        throw new Error("Formato de retorno inválido da IA.");
-      }
-    } catch (error: any) {
-      setAiMsg(`❌ Erro na extração: ${error.message}`);
+      const semArea = !area || !topic;
+      setAiMsg({
+        kind: "ok",
+        text: `✨ ${list.length} questões importadas e salvas${
+          semArea ? " — defina área/assunto delas em Gerenciar." : ` em ${area}.`
+        }`,
+      });
+      setPdfText("");
+      setPdfName("");
+    } catch (err) {
+      setAiMsg({ kind: "err", text: `❌ ${(err as Error).message}` });
     } finally {
-      setIsAiLoading(false);
-    }
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedSubjectId || !selectedTopic || !statement) return;
-    
-    setLoading(true);
-    setMsg("");
-
-    try {
-      const subjectName = currentSubject?.name || "";
-      const newQuestion = {
-        id: Date.now().toString(),
-        subject: subjectName,
-        topic: selectedTopic,
-        statement,
-        options,
-        correctOption,
-        createdAt: new Date().toISOString(),
-      };
-
-      const existingQuestions = JSON.parse(localStorage.getItem("estudos_amor_questions") || "[]");
-      localStorage.setItem("estudos_amor_questions", JSON.stringify([...existingQuestions, newQuestion]));
-
-      setMsg("✅ Questão salva com sucesso localmente!");
-      setStatement("");
-      setOptions(options.map(o => ({ ...o, text: "" })));
-    } catch (error: any) {
-      setMsg(`❌ Erro ao salvar: ${error.message}`);
-    } finally {
-      setLoading(false);
+      setBusy(false);
     }
   };
 
   return (
-    <div className="mx-auto max-w-3xl p-4 sm:p-6 space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-bold text-slate-800">Cadastrar Nova Questão 📝</h1>
-        
-        <div className="flex flex-wrap items-center gap-2">
-          <Link
-            href="/admin/questoes"
-            className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 shadow-sm"
-          >
-            Ver Questões 🗂️
-          </Link>
-
-          <button
-            onClick={exportLocalStorageData}
-            type="button"
-            className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 shadow-sm"
-          >
-            Exportar 💾
-          </button>
-
-          <label className="cursor-pointer rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 shadow-sm">
-            Importar 📂
-            <input
-              type="file"
-              accept=".json"
-              className="hidden"
-              onChange={(e) => {
-                importLocalStorageData(e, () => {
-                  alert("✅ Backup restaurado com sucesso! A página será recarregada.");
-                  window.location.reload();
-                });
-              }}
-            />
-          </label>
-        </div>
-      </div>
-
-      {/* Caixa de Importação Direta via PDF & IA */}
-      <div className="rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50/60 to-blue-50/60 p-5 sm:p-6 shadow-sm space-y-4">
+    <div className="space-y-6">
+      {/* Importador de PDF */}
+      <Card className="space-y-4 border-primary/30 bg-primary-soft/40 p-5 sm:p-6">
         <div>
-          <h2 className="text-base font-bold text-slate-800">🤖 Importador Automático de PDF com IA</h2>
-          <p className="text-xs text-slate-500 mt-1">
-            Envie o arquivo PDF com as questões. O sistema lerá o documento e a IA organizará tudo automaticamente em seu banco de dados.
+          <h2 className="flex items-center gap-2 font-bold text-text">
+            🤖 Importar de um PDF <Badge tone="primary">com IA</Badge>
+          </h2>
+          <p className="mt-1 text-xs text-muted">
+            Envie um PDF de prova. O texto é lido no seu navegador e a IA (via Groq)
+            organiza as questões. Escolha a área/assunto abaixo pra já classificar tudo.
           </p>
         </div>
 
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-          <label className="cursor-pointer flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 shadow-sm">
-            📁 Enviar Arquivo PDF
-            <input
-              type="file"
-              accept=".pdf"
-              className="hidden"
-              onChange={handlePdfUpload}
-            />
-          </label>
-          {pdfFileName && (
-            <span className="text-xs font-semibold text-slate-700 bg-white border border-slate-200 px-3 py-2.5 rounded-xl truncate">
-              📄 {pdfFileName}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <select className={selectClass} value={area} onChange={(e) => { setArea(e.target.value); setTopic(""); }}>
+            <option value="">Área (opcional)…</option>
+            {ENEM_AREAS.map((a) => (
+              <option key={a.id} value={a.name}>{a.emoji} {a.short}</option>
+            ))}
+          </select>
+          <select className={selectClass} value={topic} onChange={(e) => setTopic(e.target.value)} disabled={!area}>
+            <option value="">Assunto (opcional)…</option>
+            {topics.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <label className={cn("cursor-pointer", busy && "pointer-events-none opacity-50")}>
+            <span className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-fg">
+              📁 Escolher PDF
             </span>
-          )}
+            <input type="file" accept=".pdf" hidden onChange={readPdf} disabled={busy} />
+          </label>
+          {pdfName ? <span className="text-xs font-medium text-muted">📄 {pdfName}</span> : null}
         </div>
 
         <textarea
           rows={4}
-          className="w-full rounded-xl border border-slate-200 p-3 text-xs sm:text-sm text-slate-800 bg-white"
-          value={rawPdfText}
-          onChange={(e) => setRawPdfText(e.target.value)}
-          placeholder="Ou cole o texto bruto do PDF aqui se preferir..."
+          className={inputClass}
+          value={pdfText}
+          onChange={(e) => setPdfText(e.target.value)}
+          placeholder="…ou cole aqui o texto bruto das questões."
         />
 
-        {aiMsg && (
-          <p className={`text-xs sm:text-sm font-medium ${aiMsg.includes("Sucesso") || aiMsg.includes("sucesso") ? "text-emerald-600" : aiMsg.includes("Erro") ? "text-red-600" : "text-indigo-600"}`}>
-            {aiMsg}
-          </p>
-        )}
+        {aiMsg ? <MsgLine msg={aiMsg} /> : null}
 
-        <button
-          type="button"
-          disabled={isAiLoading || !rawPdfText.trim()}
-          onClick={handleAiExtraction}
-          className="w-full sm:w-auto rounded-xl bg-indigo-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-50 shadow-sm"
-        >
-          {isAiLoading ? "Processando com IA..." : "Extrair e Cadastrar Questões com IA 🚀"}
-        </button>
+        <Button onClick={extractWithAI} disabled={busy || !pdfText.trim()}>
+          {busy ? "Processando…" : "Extrair e salvar questões 🚀"}
+        </Button>
+      </Card>
+
+      <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-wider text-faint">
+        <div className="h-px flex-1 bg-border" />
+        ou cadastro manual
+        <div className="h-px flex-1 bg-border" />
       </div>
 
-      <div className="relative flex py-2 items-center">
-        <div className="flex-grow border-t border-slate-200"></div>
-        <span className="flex-shrink mx-4 text-xs font-semibold uppercase tracking-wider text-slate-400">ou cadastro manual</span>
-        <div className="flex-grow border-t border-slate-200"></div>
-      </div>
+      {/* Formulário manual */}
+      <Card className="p-5 sm:p-6">
+        <form onSubmit={submitManual} className="space-y-5">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Área">
+              <select className={selectClass} value={area} onChange={(e) => { setArea(e.target.value); setTopic(""); }} required>
+                <option value="">Selecione…</option>
+                {ENEM_AREAS.map((a) => (
+                  <option key={a.id} value={a.name}>{a.short}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Assunto">
+              <select className={selectClass} value={topic} onChange={(e) => setTopic(e.target.value)} required disabled={!area}>
+                <option value="">Selecione…</option>
+                {topics.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </Field>
+          </div>
 
-      {/* Formulário de Cadastro Manual */}
-      <form onSubmit={handleSubmit} className="space-y-6 rounded-2xl border border-slate-200 bg-white p-5 sm:p-6 shadow-sm">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="mb-2 block text-xs font-semibold text-slate-700">Matéria</label>
-            <select 
-              className="w-full rounded-xl border p-2.5 text-sm text-slate-800 bg-white shadow-sm"
-              value={selectedSubjectId} 
-              onChange={(e) => {
-                setSelectedSubjectId(e.target.value);
-                setSelectedTopic("");
-              }}
+          <Field label="Enunciado">
+            <textarea
+              rows={4}
               required
-            >
-              <option value="">Selecione...</option>
-              {ENEM_MATERIAS.map((sub) => (
-                <option key={sub.id} value={sub.id}>{sub.name}</option>
-              ))}
-            </select>
-          </div>
+              className={inputClass}
+              value={statement}
+              onChange={(e) => setStatement(e.target.value)}
+              placeholder="Digite o enunciado…"
+            />
+          </Field>
+
           <div>
-            <label className="mb-2 block text-xs font-semibold text-slate-700">Assunto</label>
-            <select 
-              className="w-full rounded-xl border p-2.5 text-sm text-slate-800 bg-white shadow-sm"
-              value={selectedTopic} 
-              onChange={(e) => setSelectedTopic(e.target.value)}
-              required
-              disabled={!selectedSubjectId}
-            >
-              <option value="">Selecione...</option>
-              {topics.map((top) => (
-                <option key={top} value={top}>{top}</option>
+            <p className="mb-2 text-xs font-semibold text-muted">
+              Alternativas <span className="text-faint">(marque a correta)</span>
+            </p>
+            <div className="space-y-2">
+              {options.map((opt, i) => (
+                <div key={opt.letter} className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCorrect(opt.letter)}
+                    aria-label={`Marcar ${opt.letter} como correta`}
+                    className={cn(
+                      "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm font-bold transition",
+                      correct === opt.letter
+                        ? "bg-ok text-white"
+                        : "bg-surface-2 text-muted hover:bg-border",
+                    )}
+                  >
+                    {opt.letter}
+                  </button>
+                  <input
+                    type="text"
+                    required
+                    className={inputClass}
+                    value={opt.text}
+                    onChange={(e) => {
+                      const next = [...options];
+                      next[i] = { ...next[i], text: e.target.value };
+                      setOptions(next);
+                    }}
+                    placeholder={`Texto da alternativa ${opt.letter}`}
+                  />
+                </div>
               ))}
-            </select>
+            </div>
           </div>
-        </div>
 
-        <div>
-          <label className="mb-2 block text-xs font-semibold text-slate-700">Enunciado</label>
-          <textarea
-            required
-            rows={4}
-            className="w-full rounded-xl border p-3 text-sm text-slate-800 shadow-sm"
-            value={statement}
-            onChange={(e) => setStatement(e.target.value)}
-            placeholder="Digite o enunciado da questão..."
-          />
-        </div>
+          <Field label="Resolução / comentário (opcional)">
+            <textarea
+              rows={2}
+              className={inputClass}
+              value={explanation}
+              onChange={(e) => setExplanation(e.target.value)}
+              placeholder="Aparece depois que a questão é respondida."
+            />
+          </Field>
 
-        <div>
-          <label className="mb-4 block text-xs font-semibold text-slate-700">Alternativas</label>
-          <div className="space-y-3">
-            {options.map((opt, index) => (
-              <div key={opt.letter} className="flex items-center gap-3">
-                <span className="font-bold text-slate-500">{opt.letter})</span>
-                <input
-                  type="text"
-                  required
-                  className="flex-1 rounded-xl border p-2.5 text-sm text-slate-800 shadow-sm"
-                  value={opt.text}
-                  onChange={(e) => handleOptionChange(index, e.target.value)}
-                  placeholder={`Texto da alternativa ${opt.letter}`}
-                />
-                <input
-                  type="radio"
-                  name="correctOption"
-                  value={opt.letter}
-                  checked={correctOption === opt.letter}
-                  onChange={(e) => setCorrectOption(e.target.value)}
-                  className="h-5 w-5 cursor-pointer accent-emerald-500"
-                  title="Marcar como correta"
-                />
-              </div>
-            ))}
-          </div>
-          <p className="mt-2 text-xs text-slate-400">Selecione a bolinha da alternativa que é a correta.</p>
-        </div>
+          {msg ? <MsgLine msg={msg} /> : null}
 
-        {msg && <p className={`text-sm font-medium ${msg.includes("sucesso") ? "text-emerald-600" : "text-red-600"}`}>{msg}</p>}
-
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full rounded-xl bg-emerald-600 py-3.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50 shadow-sm"
-        >
-          {loading ? "Salvando..." : "Salvar Questão"}
-        </button>
-      </form>
+          <Button type="submit" size="lg" className="w-full">
+            Salvar questão
+          </Button>
+        </form>
+      </Card>
     </div>
+  );
+}
+
+function MsgLine({ msg }: { msg: NonNullable<Msg> }) {
+  return (
+    <p
+      className={cn(
+        "text-sm font-medium",
+        msg.kind === "ok" && "text-ok",
+        msg.kind === "err" && "text-bad",
+        msg.kind === "info" && "text-primary",
+      )}
+    >
+      {msg.text}
+    </p>
   );
 }
