@@ -5,6 +5,7 @@ import { themeScript } from "@/lib/theme";
 import { ServiceWorkerRegister, ThemeSync } from "@/components/AppChrome";
 import { AppShell } from "@/components/shell/AppShell";
 import { Onboarding } from "@/components/Onboarding";
+import { StorageAlert } from "@/components/StorageAlert";
 
 const inter = Inter({ subsets: ["latin"], display: "swap" });
 
@@ -44,6 +45,7 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         <ThemeSync />
         <ServiceWorkerRegister />
+        <StorageAlert />
         <AppShell>{children}</AppShell>
         <Onboarding />
       </body>

@@ -1,27 +1,32 @@
 "use client";
 
-// Camada de dados única do app.
+// Camada de dados do app. Há DUAS fontes de questões, deliberadamente separadas:
 //
-// - Fonte da verdade: um objeto `AppData` em memória.
-// - Persistência local: localStorage (sempre, funciona offline).
-// - Persistência remota: Realtime Database (opcional — só se configurado).
+//   1. Catálogo do ENEM — estático, somente leitura, versionado em
+//      public/catalogo/, carregado sob demanda e cacheado pelo service worker.
+//      NUNCA entra no localStorage inteiro, nunca sobe para o RTDB, nunca pode
+//      ser apagado por sincronização. São ~2.600 questões idênticas em todo
+//      aparelho — não são dado da aluna.
 //
-// O banco de questões é grande e muda pouco; os dados da aluna (tentativas,
-// redações, ajustes) são pequenos e mudam a cada questão respondida. Por isso
-// ficam em nós/chaves SEPARADOS — assim responder uma questão não reescreve
-// 3 MB de questões toda hora.
-//   valessa/questions  ->  { list: Question[], updatedAt }
-//   valessa/user       ->  { ...resto do AppData, updatedAt }
+//   2. Dados da aluna — pequenos, mudam a cada questão respondida: tentativas,
+//      redações, ajustes, favoritas E as questões que ela mesma cadastra.
+//      Persistidos em localStorage e espelhados no Realtime Database.
+//        valessa/questions  ->  { list: Question[] (só as dela), updatedAt }
+//        valessa/user       ->  { ...resto do AppData, updatedAt }
+//
+// `useAppData().questions` devolve a UNIÃO das duas, com id prefixado por origem
+// (catálogo = "enem-…") para nunca colidir.
 
 import { useMemo, useSyncExternalStore } from "react";
 import { onValue, ref, set as rtdbSet } from "firebase/database";
 import { rtdb } from "@/lib/firebase";
-import { DEFAULT_ENEM_DATES } from "@/lib/enem";
+import { DEFAULT_ENEM_DATES, areaName } from "@/lib/enem";
 import type {
   AppData,
   Attempt,
   Difficulty,
   Question,
+  QuestionOption,
   Redacao,
   Session,
   Settings,
@@ -76,12 +81,159 @@ let userUpdatedAt = 0;
 let qUpdatedAt = 0;
 let applyingRemote = false;
 
+// true = a lista inteira do catálogo que a nuvem já entregou NÃO coube no disco
+// deste aparelho. Enquanto estiver assim, não gravamos nem propagamos o bloco
+// `questions`: um pedaço da lista com carimbo novo passaria a "vencer" a
+// sincronização e apagaria o catálogo dos outros aparelhos. Zera sozinho quando
+// um sync completo volta a caber.
+let questionsIncomplete = false;
+
 const listeners = new Set<() => void>();
 let userTimer: ReturnType<typeof setTimeout> | null = null;
 let qTimer: ReturnType<typeof setTimeout> | null = null;
 
 function emit() {
   for (const l of listeners) l();
+}
+
+/* ------------------------------------------------------------------ */
+/* Armazenamento local: escrita segura e aviso de cota cheia           */
+/*                                                                    */
+/* Uma escrita que estoura a cota do localStorage NÃO pode passar em   */
+/* silêncio nem avançar o relógio de last-write-wins — foi assim que o */
+/* banco de questões sumiu sem ninguém ver. Quando falha, avisamos na  */
+/* tela e o bloco fica só em memória: o disco continua intacto, então  */
+/* a versão da nuvem volta a valer no próximo carregamento.            */
+/* ------------------------------------------------------------------ */
+
+const MSG_Q_FULL =
+  "Sem espaço neste aparelho para guardar as questões offline. O banco do ENEM " +
+  "vem da nuvem e não é afetado; suas respostas e favoritas também estão a " +
+  "salvo. Só as questões que você cadastrar aqui podem não ficar guardadas se " +
+  "usar o app sem internet.";
+const MSG_USER_FULL =
+  "Sem espaço para salvar neste aparelho. Seu progresso está sincronizando " +
+  "pela nuvem, mas pode não ficar guardado se você usar o app offline.";
+
+let storageError: string | null = null;
+let storageErrorFor: "user" | "questions" | null = null;
+
+function setStorageError(scope: "user" | "questions", msg: string) {
+  if (storageErrorFor === scope && storageError === msg) return;
+  storageErrorFor = scope;
+  storageError = msg;
+  emit();
+}
+
+function clearStorageError(scope: "user" | "questions") {
+  if (storageErrorFor !== scope) return;
+  storageErrorFor = null;
+  storageError = null;
+  emit();
+}
+
+function isQuotaError(e: unknown): boolean {
+  return (
+    typeof DOMException !== "undefined" &&
+    e instanceof DOMException &&
+    (e.name === "QuotaExceededError" ||
+      e.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
+      e.code === 22 ||
+      e.code === 1014)
+  );
+}
+
+/** Grava no localStorage tratando cota cheia explicitamente.
+ *  Retorna true só se realmente persistiu. */
+function safeSet(scope: "user" | "questions", key: string, value: string): boolean {
+  try {
+    localStorage.setItem(key, value);
+    clearStorageError(scope);
+    return true;
+  } catch (e) {
+    if (isQuotaError(e)) {
+      setStorageError(scope, scope === "questions" ? MSG_Q_FULL : MSG_USER_FULL);
+    } else {
+      console.warn(`[store] falha ao gravar ${scope}:`, e);
+    }
+    return false;
+  }
+}
+
+function numberOr(v: unknown, d = 0): number {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : d;
+}
+
+/* ------------------------------------------------------------------ */
+/* Catálogo estático do ENEM (public/catalogo/)                        */
+/* ------------------------------------------------------------------ */
+
+const CATALOG_AREAS = ["matematica", "linguagens", "humanas", "natureza"];
+
+/** Prefixo de origem: ids do catálogo começam com "enem-". */
+export function isCatalogId(id: string): boolean {
+  return id.startsWith("enem-");
+}
+
+interface CatalogRecord {
+  id: string;
+  area: string;
+  year: number;
+  topic?: string;
+  statement: string;
+  options: QuestionOption[];
+  correctOption: string;
+  difficulty?: Difficulty;
+  imageUrl?: string;
+  possiblyHasImage?: boolean;
+  source?: string;
+}
+
+function catalogToQuestion(r: CatalogRecord): Question {
+  return {
+    id: r.id,
+    subject: areaName(r.area),
+    topic: r.topic ?? "",
+    statement: r.statement,
+    options: Array.isArray(r.options) ? r.options : [],
+    correctOption: r.correctOption ?? "",
+    explanation: undefined,
+    optionComments: undefined,
+    year: Number.isFinite(r.year) ? r.year : undefined,
+    difficulty: r.difficulty,
+    skill: undefined,
+    imageUrl: r.imageUrl || undefined,
+    possiblyHasImage: !!r.possiblyHasImage,
+    source: r.source || (r.year ? `ENEM ${r.year}` : undefined),
+    createdAt: r.year ? `${r.year}-11-01T00:00:00.000Z` : new Date(0).toISOString(),
+  };
+}
+
+let catalog: Question[] = [];
+let catalogState: "idle" | "loading" | "ready" | "error" = "idle";
+
+async function loadCatalog() {
+  if (typeof window === "undefined") return;
+  if (catalogState === "loading" || catalogState === "ready") return;
+  catalogState = "loading";
+  try {
+    const parts = await Promise.all(
+      CATALOG_AREAS.map((a) =>
+        fetch(`/catalogo/${a}.json`, { cache: "force-cache" }).then((r) => {
+          if (!r.ok) throw new Error(`${a}.json → ${r.status}`);
+          return r.json() as Promise<CatalogRecord[]>;
+        }),
+      ),
+    );
+    catalog = parts.flat().map(catalogToQuestion);
+    catalogState = "ready";
+  } catch (e) {
+    console.warn("[store] catálogo não carregou:", e);
+    catalogState = "error";
+  }
+  invalidateSnapshot();
+  emit();
 }
 
 /* ------------------------------------------------------------------ */
@@ -253,11 +405,40 @@ function hydrate() {
     const rawLegacy = localStorage.getItem(LEGACY_KEY);
 
     if (rawUser || rawQ) {
-      const user = coerceUser(rawUser ? JSON.parse(rawUser) : {});
-      const questions = normQuestions(rawQ ? JSON.parse(rawQ) : []);
-      data = { ...user, questions };
-      userUpdatedAt = Number(localStorage.getItem(USER_TS)) || 1;
-      qUpdatedAt = Number(localStorage.getItem(Q_TS)) || (questions.length ? 1 : 0);
+      const userParsed: unknown = rawUser ? JSON.parse(rawUser) : {};
+      const qParsed: unknown = rawQ ? JSON.parse(rawQ) : null;
+
+      // Formato atual: um único valor { list, updatedAt } / { ...user,
+      // updatedAt }. Formato antigo: dado cru + timestamp numa chave à parte
+      // (ea:v2:*_ts) — a escrita em dois passos que deixava carimbo novo sobre
+      // lista velha quando a cota estourava. A leitura aceita os dois.
+      const qList = Array.isArray(qParsed) ? qParsed : asObj(qParsed).list;
+      const questions = normQuestions(qList);
+      data = { ...coerceUser(userParsed), questions };
+
+      const legacyUserTs = numberOr(localStorage.getItem(USER_TS));
+      const legacyQTs = numberOr(localStorage.getItem(Q_TS));
+      userUpdatedAt =
+        numberOr(asObj(userParsed).updatedAt) || legacyUserTs || (rawUser ? 1 : 0);
+      qUpdatedAt =
+        numberOr(asObj(qParsed).updatedAt) || legacyQTs || (questions.length ? 1 : 0);
+
+      // Consolida no formato de valor único e só então descarta as chaves de
+      // timestamp soltas — nunca antes de a gravação combinada ter retornado.
+      if (rawQ && (Array.isArray(qParsed) || legacyQTs) && writeLocalQuestions()) {
+        try {
+          localStorage.removeItem(Q_TS);
+        } catch {
+          /* noop */
+        }
+      }
+      if (rawUser && !("updatedAt" in asObj(userParsed)) && writeLocalUser()) {
+        try {
+          localStorage.removeItem(USER_TS);
+        } catch {
+          /* noop */
+        }
+      }
     } else if (rawLegacy) {
       // migra o formato combinado antigo → dois blocos
       const parsed = asObj(JSON.parse(rawLegacy));
@@ -267,13 +448,17 @@ function hydrate() {
       };
       userUpdatedAt = Date.now();
       qUpdatedAt = data.questions.length ? Date.now() : 0;
-      writeLocalUser();
-      writeLocalQuestions();
-      try {
-        localStorage.removeItem(LEGACY_KEY);
-        localStorage.removeItem("ea:v2:ts");
-      } catch {
-        /* noop */
+      const movedUser = writeLocalUser();
+      const movedQ = writeLocalQuestions();
+      // Só descarta o blob antigo se os dois blocos novos realmente
+      // persistiram — senão a migração apagaria dado que não foi copiado.
+      if (movedUser && movedQ) {
+        try {
+          localStorage.removeItem(LEGACY_KEY);
+          localStorage.removeItem("ea:v2:ts");
+        } catch {
+          /* noop */
+        }
       }
     } else {
       const veryOld = migrateVeryOld();
@@ -289,8 +474,28 @@ function hydrate() {
     qUpdatedAt = 0;
   }
 
+  migrateCatalogOutOfStore();
   attachRemote();
   emit();
+}
+
+/** O catálogo do ENEM agora é estático (public/catalogo/). Se ainda houver
+ *  questões dele — ou lixo sem área — no bloco `questions` da aluna, tira daqui:
+ *  elas passam a vir do catálogo. Preserva as questões próprias dela e todo o
+ *  histórico (attempts/favorites/reviewedAt não são tocados). */
+function migrateCatalogOutOfStore() {
+  if (!data) return;
+  const before = data.questions.length;
+  data.questions = data.questions.filter(
+    (q) => !isCatalogId(q.id) && q.subject.trim() !== "",
+  );
+  if (data.questions.length === before) return;
+
+  // Reescreve o bloco enxuto e propaga — isso também limpa o `valessa/questions`
+  // no RTDB (que ainda carrega o catálogo + as questões de teste) na primeira
+  // vez que este aparelho sincronizar com o código novo.
+  qUpdatedAt = Date.now();
+  if (writeLocalQuestions()) schedulePushQuestions();
 }
 
 function userSlice(d: AppData) {
@@ -299,24 +504,26 @@ function userSlice(d: AppData) {
   return rest;
 }
 
-function writeLocalUser() {
-  if (!data || typeof window === "undefined") return;
-  try {
-    localStorage.setItem(USER_KEY, JSON.stringify(userSlice(data)));
-    localStorage.setItem(USER_TS, String(userUpdatedAt));
-  } catch (e) {
-    console.warn("[store] falha ao gravar user:", e);
-  }
+// Lista/tabela e o carimbo de tempo vão num ÚNICO valor serializado: ou os dois
+// persistem juntos, ou nenhum. Nunca mais "timestamp novo apontando para lista
+// velha" — o estado que fazia o guard de last-write-wins rejeitar a nuvem para
+// sempre.
+function writeLocalUser(): boolean {
+  if (!data || typeof window === "undefined") return false;
+  return safeSet(
+    "user",
+    USER_KEY,
+    JSON.stringify({ ...userSlice(data), updatedAt: userUpdatedAt }),
+  );
 }
 
-function writeLocalQuestions() {
-  if (!data || typeof window === "undefined") return;
-  try {
-    localStorage.setItem(Q_KEY, JSON.stringify(data.questions));
-    localStorage.setItem(Q_TS, String(qUpdatedAt));
-  } catch (e) {
-    console.warn("[store] falha ao gravar questions:", e);
-  }
+function writeLocalQuestions(): boolean {
+  if (!data || typeof window === "undefined") return false;
+  return safeSet(
+    "questions",
+    Q_KEY,
+    JSON.stringify({ list: data.questions, updatedAt: qUpdatedAt }),
+  );
 }
 
 function pushUser() {
@@ -347,16 +554,37 @@ function pushQuestions() {
   }
 }
 
-function scheduleUser() {
-  writeLocalUser();
+function schedulePushUser() {
   if (userTimer) clearTimeout(userTimer);
   userTimer = setTimeout(pushUser, 600);
 }
 
-function scheduleQuestions() {
-  writeLocalQuestions();
+function schedulePushQuestions() {
   if (qTimer) clearTimeout(qTimer);
   qTimer = setTimeout(pushQuestions, 800);
+}
+
+/** Persiste a mutação do bloco `user` e agenda o push — mas só avança o
+ *  carimbo de tempo (e portanto só propaga) se a gravação local funcionou. */
+function commitUser() {
+  const prev = userUpdatedAt;
+  userUpdatedAt = Date.now();
+  if (writeLocalUser()) schedulePushUser();
+  else userUpdatedAt = prev;
+}
+
+/** Idem para `questions`. Se o catálogo remoto não coube no disco, o bloco
+ *  local é parcial: não gravamos por cima (viraria lista curta com carimbo
+ *  novo, que a sincronização passaria a preferir) nem propagamos. */
+function commitQuestions() {
+  if (questionsIncomplete) {
+    setStorageError("questions", MSG_Q_FULL);
+    return;
+  }
+  const prev = qUpdatedAt;
+  qUpdatedAt = Date.now();
+  if (writeLocalQuestions()) schedulePushQuestions();
+  else qUpdatedAt = prev;
 }
 
 function attachRemote() {
@@ -381,9 +609,14 @@ function attachRemote() {
     const ts = Number(remote.updatedAt ?? 0);
     if (ts <= qUpdatedAt) return;
     applyingRemote = true;
-    data = { ...data, questions: normQuestions(remote.list) };
+    // O bloco `questions` do RTDB é só das questões próprias dela. Se ainda vier
+    // catálogo antigo ou lixo sem área, ignora — o catálogo é estático agora.
+    const own = normQuestions(remote.list).filter(
+      (q) => !isCatalogId(q.id) && q.subject.trim() !== "",
+    );
+    data = { ...data, questions: own };
     qUpdatedAt = ts;
-    writeLocalQuestions();
+    questionsIncomplete = !writeLocalQuestions();
     applyingRemote = false;
     emit();
   });
@@ -412,10 +645,7 @@ function mutateUser(fn: (d: AppData) => void) {
   if (!data) data = defaultData();
   fn(data);
   data = clone(data);
-  if (!applyingRemote) {
-    userUpdatedAt = Date.now();
-    scheduleUser();
-  }
+  if (!applyingRemote) commitUser();
   emit();
 }
 
@@ -425,17 +655,20 @@ function mutateQuestions(fn: (d: AppData) => void) {
   if (!data) data = defaultData();
   fn(data);
   data = clone(data);
-  if (!applyingRemote) {
-    qUpdatedAt = Date.now();
-    scheduleQuestions();
-  }
+  if (!applyingRemote) commitQuestions();
   emit();
+}
+
+// Prefixo "own-" nas questões que a aluna cadastra — nunca colide com o
+// catálogo ("enem-…").
+function ownId(): string {
+  return `own-${genId()}`;
 }
 
 export function addQuestion(
   q: Omit<Question, "id" | "createdAt"> & { id?: string; createdAt?: string },
 ): string {
-  const id = q.id ?? genId();
+  const id = q.id ?? ownId();
   mutateQuestions((d) => {
     d.questions.push({ ...q, id, createdAt: q.createdAt ?? new Date().toISOString() });
   });
@@ -448,7 +681,7 @@ export function addQuestions(
   const ids: string[] = [];
   mutateQuestions((d) => {
     for (const q of list) {
-      const id = q.id ?? genId();
+      const id = q.id ?? ownId();
       ids.push(id);
       d.questions.push({ ...q, id, createdAt: new Date().toISOString() });
     }
@@ -457,6 +690,7 @@ export function addQuestions(
 }
 
 export function updateQuestion(id: string, patch: Partial<Question>) {
+  if (isCatalogId(id)) return; // catálogo é somente leitura
   mutateQuestions((d) => {
     const i = d.questions.findIndex((q) => q.id === id);
     if (i >= 0) d.questions[i] = { ...d.questions[i], ...patch, id };
@@ -464,6 +698,7 @@ export function updateQuestion(id: string, patch: Partial<Question>) {
 }
 
 export function deleteQuestion(id: string) {
+  if (isCatalogId(id)) return; // catálogo é somente leitura
   mutateQuestions((d) => {
     d.questions = d.questions.filter((q) => q.id !== id);
     d.favorites = d.favorites.filter((f) => f !== id);
@@ -548,9 +783,12 @@ export function deleteRedacao(id: string) {
   });
 }
 
-export function exportData(): AppData {
+/** Só as questões próprias e o progresso — o catálogo do ENEM NÃO entra no
+ *  backup, ele vem do app. */
+export function exportData(): Omit<AppData, "questions"> & { questions: Question[] } {
   if (!hydrated) hydrate();
-  return data ?? defaultData();
+  const d = data ?? defaultData();
+  return { ...userSlice(d), questions: d.questions.filter((q) => !isCatalogId(q.id)) };
 }
 
 export function importData(incoming: unknown, mode: "merge" | "replace" = "merge") {
@@ -560,7 +798,10 @@ export function importData(incoming: unknown, mode: "merge" | "replace" = "merge
       ? raw
       : { questions: raw.questions, attempts: raw.history, favorites: raw.favorites };
   const user = coerceUser(source);
-  const questions = normQuestions(asObj(source).questions);
+  // Nunca reimporta catálogo para o store — ele é estático.
+  const questions = normQuestions(asObj(source).questions).filter(
+    (q) => !isCatalogId(q.id) && q.subject.trim() !== "",
+  );
 
   const applyQ = (d: AppData) => {
     if (mode === "replace") {
@@ -623,16 +864,66 @@ export function clearQuestions() {
 function subscribe(listener: () => void) {
   listeners.add(listener);
   if (!hydrated) queueMicrotask(hydrate);
+  if (catalogState === "idle") queueMicrotask(loadCatalog);
   return () => {
     listeners.delete(listener);
   };
 }
 
-const getSnapshot = (): AppData => data ?? SERVER_SNAPSHOT;
+// Snapshot = dados da aluna + catálogo, memoizado por identidade (o
+// useSyncExternalStore exige referência estável). `data` vira objeto novo a cada
+// mutação (clone); `catalog` vira array novo quando carrega — as duas checagens
+// de identidade bastam.
+let snapshotCache: AppData | null = null;
+let snapshotFromData: AppData | null = null;
+let snapshotFromCatalog: Question[] | null = null;
+
+function invalidateSnapshot() {
+  snapshotCache = null;
+}
+
+function getSnapshot(): AppData {
+  if (!data) return SERVER_SNAPSHOT;
+  if (!catalog.length) return data;
+  if (
+    snapshotCache &&
+    snapshotFromData === data &&
+    snapshotFromCatalog === catalog
+  ) {
+    return snapshotCache;
+  }
+  const ownIds = new Set(data.questions.map((q) => q.id));
+  const extra = ownIds.size
+    ? catalog.filter((q) => !ownIds.has(q.id))
+    : catalog;
+  snapshotCache = { ...data, questions: data.questions.concat(extra) };
+  snapshotFromData = data;
+  snapshotFromCatalog = catalog;
+  return snapshotCache;
+}
 const getServerSnapshot = (): AppData => SERVER_SNAPSHOT;
 
 export function useAppData(): AppData {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+}
+
+/** Só as questões que a aluna cadastrou (sem o catálogo). Para as telas de
+ *  administração, que editam/apagam questões próprias. */
+export function useOwnQuestions(): Question[] {
+  return useSyncExternalStore(
+    subscribe,
+    () => (data ? data.questions : SERVER_SNAPSHOT.questions),
+    () => SERVER_SNAPSHOT.questions,
+  );
+}
+
+/** Estado do carregamento do catálogo estático. */
+export function useCatalogState(): "idle" | "loading" | "ready" | "error" {
+  return useSyncExternalStore(
+    subscribe,
+    () => catalogState,
+    () => "idle" as const,
+  );
 }
 
 export function useHydrated(): boolean {
@@ -640,6 +931,15 @@ export function useHydrated(): boolean {
     subscribe,
     () => hydrated && data !== null,
     () => false,
+  );
+}
+
+/** Mensagem de erro de armazenamento local (cota cheia), ou null. */
+export function useStorageError(): string | null {
+  return useSyncExternalStore(
+    subscribe,
+    () => storageError,
+    () => null,
   );
 }
 

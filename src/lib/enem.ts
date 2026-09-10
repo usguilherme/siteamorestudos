@@ -99,6 +99,34 @@ export const ENEM_AREAS: EnemArea[] = [
 
 export const ENEM_AREA_NAMES = ENEM_AREAS.map((a) => a.name);
 
+// Conjunto CANÔNICO de chaves de área. `id` (slug curto) é a chave canônica;
+// `Question.subject` guarda o nome completo por compatibilidade. Todo o resto
+// — importador, catálogo, store, UI — normaliza para cá numa única passagem.
+export const AREA_IDS = ENEM_AREAS.map((a) => a.id);
+
+const AREA_ALIASES: Record<string, string> = {};
+for (const a of ENEM_AREAS) {
+  AREA_ALIASES[a.id] = a.id;
+  AREA_ALIASES[a.name] = a.id;
+}
+// slugs que a API do enem.dev devolve
+AREA_ALIASES["ciencias-humanas"] = "humanas";
+AREA_ALIASES["ciencias-natureza"] = "natureza";
+
+/** Qualquer grafia de área → slug canônico, ou null se não reconhecida. */
+export function areaId(input: string | null | undefined): string | null {
+  return AREA_ALIASES[(input ?? "").trim()] ?? null;
+}
+
+/** slug canônico → nome completo (o valor guardado em `Question.subject`). */
+export function areaName(id: string): string {
+  return ENEM_AREAS.find((a) => a.id === id)?.name ?? id;
+}
+
+export function isCanonicalArea(input: string | null | undefined): boolean {
+  return areaId(input) !== null;
+}
+
 export function getArea(name: string): EnemArea | undefined {
   return ENEM_AREAS.find((a) => a.name === name || a.id === name);
 }
