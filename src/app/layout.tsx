@@ -2,12 +2,8 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { themeScript } from "@/lib/theme";
-import {
-  Footer,
-  Navbar,
-  ServiceWorkerRegister,
-  ThemeSync,
-} from "@/components/AppChrome";
+import { ServiceWorkerRegister, ThemeSync } from "@/components/AppChrome";
+import { AppShell } from "@/components/shell/AppShell";
 import { Onboarding } from "@/components/Onboarding";
 
 const inter = Inter({ subsets: ["latin"], display: "swap" });
@@ -31,10 +27,10 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f6f7fb" },
-    { media: "(prefers-color-scheme: dark)", color: "#0a0f1e" },
+    { media: "(prefers-color-scheme: light)", color: "#f7f6fb" },
+    { media: "(prefers-color-scheme: dark)", color: "#0f0d15" },
   ],
-  colorScheme: "light dark",
+  colorScheme: "dark light",
 };
 
 export default function RootLayout({
@@ -44,13 +40,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="pt-BR" suppressHydrationWarning>
-      <body className={`${inter.className} flex min-h-[100dvh] flex-col`}>
+      <body className={inter.className}>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         <ThemeSync />
         <ServiceWorkerRegister />
-        <Navbar />
-        <main className="flex-1 pb-16">{children}</main>
-        <Footer />
+        <AppShell>{children}</AppShell>
         <Onboarding />
       </body>
     </html>

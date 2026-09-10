@@ -49,8 +49,10 @@ const DEFAULT_SETTINGS: Settings = {
   name: "",
   dailyGoal: 15,
   enemDates: DEFAULT_ENEM_DATES,
-  theme: "system",
+  theme: "dark",
   onboarded: false,
+  sidebarCollapsed: false,
+  openedCorrecoes: [],
 };
 
 function defaultData(): AppData {

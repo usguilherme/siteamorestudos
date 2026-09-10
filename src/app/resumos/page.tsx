@@ -27,7 +27,7 @@ function ResumosInner() {
   );
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5 px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-3xl space-y-5">
       <PageHeader
         title="Resumos rápidos 📄"
         subtitle="Uma tela por assunto: o essencial, as fórmulas e a pegadinha."

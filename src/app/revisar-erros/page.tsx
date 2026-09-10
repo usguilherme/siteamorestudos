@@ -32,7 +32,7 @@ export default function RevisarErrosPage() {
 
   if (hydrated && queue.length === 0) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+      <div className="mx-auto max-w-3xl">
         <PageHeader title="Revisar erros 🔁" subtitle="O que você errou e ainda não recuperou." />
         <EmptyState
           icon="🎯"
@@ -45,7 +45,7 @@ export default function RevisarErrosPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5 px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-3xl space-y-5">
       <PageHeader
         title="Revisar erros 🔁"
         subtitle="Fila de revisão espaçada: revise, e a questão volta mais pra frente."

@@ -26,7 +26,7 @@ export default function GuiaRedacaoPage() {
   const [tab, setTab] = useState<Tab>("competencias");
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5 px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-3xl space-y-5">
       <PageHeader
         title="Guia de redação ✍️"
         subtitle="O que o corretor procura e onde as notas escorregam."

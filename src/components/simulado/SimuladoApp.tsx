@@ -295,7 +295,7 @@ export function SimuladoApp() {
   /* ----------------------------- SETUP ----------------------------- */
   if (phase === "setup") {
     return (
-      <div className="mx-auto max-w-2xl space-y-6 px-4 py-8 sm:px-6">
+      <div className="mx-auto max-w-2xl space-y-6">
         <div>
           <h1 className="text-2xl font-extrabold tracking-tight text-text sm:text-3xl">
             Montar simulado 📝
@@ -510,7 +510,7 @@ export function SimuladoApp() {
     );
 
     return (
-      <div className="mx-auto max-w-2xl space-y-5 px-4 py-8 sm:px-6">
+      <div className="mx-auto max-w-2xl space-y-5">
         <Card className="p-6 text-center sm:p-8">
           <p className="text-5xl">{acc >= 75 ? "🌟" : acc >= 50 ? "💪" : "🤍"}</p>
           <h1 className="mt-2 text-2xl font-extrabold text-text">Simulado concluído!</h1>

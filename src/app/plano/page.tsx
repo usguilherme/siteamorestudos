@@ -20,7 +20,7 @@ export default function PlanoPage() {
   const plan = useDayPlan();
 
   return (
-    <div className="mx-auto max-w-2xl space-y-5 px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-2xl space-y-5">
       <PageHeader
         title="Plano de hoje 🗓️"
         subtitle={hydrated ? `${greeting(settings.name)} — foco no que rende mais ponto.` : " "}

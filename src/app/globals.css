@@ -1,67 +1,93 @@
 @import "tailwindcss";
 
-/* Modo escuro por classe (.dark no <html>). */
-@custom-variant dark (&:where(.dark, .dark *));
+/* Modo escuro/claro por classe no <html>.
+   O app é DARK-FIRST: sem classe nenhuma (SSR, primeiro paint) já é escuro.
+   `.light` reabre a paleta clara; `.dark` é o escuro explícito. */
+@custom-variant dark (&:is(:root:not(.light) *, :root:not(.light)));
+@custom-variant light (&:is(.light *, .light));
 
 /* ---------------------------------------------------------------- */
-/* Tokens semânticos — trocam de valor entre claro e escuro.        */
+/* Tokens semânticos — trocam de valor entre escuro (padrão) e claro */
+/* Nenhum hex solto em componente. Precisa de uma cor? Crie o token. */
 /* ---------------------------------------------------------------- */
 :root {
-  --bg: #f6f7fb;
-  --surface: #ffffff;
-  --surface-2: #f1f5f9;
-  --border: #e5e7eb;
-  --border-strong: #d1d5db;
-  --text: #0f172a;
-  --muted: #64748b;
-  --faint: #94a3b8;
+  /* superfícies: hierarquia por elevação + cor, não por sombra */
+  --bg: #0f0d15; /* quase-preto arroxeado */
+  --surface: #1a1622; /* card — um degrau acima do fundo */
+  --surface-2: #241e30; /* input / pill / hover — dois degraus */
+  --border: rgb(255 255 255 / 0.08); /* linha translúcida, nunca cinza sólido */
+  --border-strong: rgb(255 255 255 / 0.14);
 
-  --primary: #4f46e5;
-  --primary-hover: #4338ca;
-  --primary-soft: #eef2ff;
+  --text: #ede9f4; /* quase-branco levemente arroxeado (~13:1 no bg) */
+  --muted: #a9a2bc; /* secundário com contraste real (~7:1 no bg) */
+  --faint: #7e7791; /* terciário — apoio, nunca corpo de texto */
+
+  --primary: #7c3aed; /* roxo — CTA, item ativo, card de destaque */
+  --primary-hover: #8b5cf6;
+  --primary-deep: #4c1d95; /* fim do gradiente do card de destaque */
+  --primary-soft: rgb(124 58 237 / 0.16); /* fundo tintado do item ativo / badge */
+  --primary-fg: #ffffff;
+
+  /* acento decorativo (só o gradiente do countdown) */
+  --accent: #fb7185;
+  --accent-soft: rgb(251 113 133 / 0.16);
+
+  /* dois acentos de status — e mais nenhum */
+  --xp: #f59e0b; /* âmbar — XP / conquista */
+  --xp-soft: rgb(245 158 11 / 0.16);
+  --freq: #fb923c; /* laranja — frequência da semana */
+  --freq-soft: rgb(251 146 60 / 0.16);
+
+  /* feedback de resposta (certo/errado) — usados dentro do simulado */
+  --ok: #34d399;
+  --ok-soft: rgb(52 211 153 / 0.15);
+  --warn: #fbbf24;
+  --warn-soft: rgb(251 191 36 / 0.15);
+  --bad: #f87171;
+  --bad-soft: rgb(248 113 113 / 0.15);
+
+  --ring: #8b5cf6;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 32px -16px rgb(0 0 0 / 0.55);
+
+  /* dois raios apenas: cards grandes x controles */
+  --r-card: 20px;
+  --r-control: 10px;
+}
+
+.light {
+  --bg: #f7f6fb;
+  --surface: #ffffff;
+  --surface-2: #f1eef8;
+  --border: rgb(17 12 34 / 0.09);
+  --border-strong: rgb(17 12 34 / 0.16);
+
+  --text: #17141f;
+  --muted: #5d5470;
+  --faint: #8b8399;
+
+  --primary: #7c3aed;
+  --primary-hover: #6d28d9;
+  --primary-deep: #5b21b6;
+  --primary-soft: rgb(124 58 237 / 0.1);
   --primary-fg: #ffffff;
 
   --accent: #e11d48;
-  --accent-soft: #ffe4e6;
+  --accent-soft: rgb(225 29 72 / 0.1);
+
+  --xp: #b45309;
+  --xp-soft: rgb(180 83 9 / 0.12);
+  --freq: #c2410c;
+  --freq-soft: rgb(194 65 12 / 0.12);
 
   --ok: #059669;
-  --ok-soft: #ecfdf5;
-  --warn: #d97706;
-  --warn-soft: #fffbeb;
+  --ok-soft: rgb(5 150 105 / 0.1);
+  --warn: #b45309;
+  --warn-soft: rgb(180 83 9 / 0.12);
   --bad: #dc2626;
-  --bad-soft: #fef2f2;
+  --bad-soft: rgb(220 38 38 / 0.1);
 
-  --ring: #6366f1;
+  --ring: #7c3aed;
   --shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 8px 24px -12px rgb(15 23 42 / 0.12);
-}
-
-.dark {
-  --bg: #0a0f1e;
-  --surface: #121829;
-  --surface-2: #1b2236;
-  --border: #26304a;
-  --border-strong: #33405f;
-  --text: #e8ecf5;
-  --muted: #97a3bd;
-  --faint: #6b7794;
-
-  --primary: #7c83ff;
-  --primary-hover: #9096ff;
-  --primary-soft: #1e2344;
-  --primary-fg: #0a0f1e;
-
-  --accent: #fb7185;
-  --accent-soft: #3d1f2b;
-
-  --ok: #34d399;
-  --ok-soft: #10241d;
-  --warn: #fbbf24;
-  --warn-soft: #2a2211;
-  --bad: #f87171;
-  --bad-soft: #2c1616;
-
-  --ring: #7c83ff;
-  --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 32px -12px rgb(0 0 0 / 0.6);
 }
 
 @theme inline {
@@ -76,11 +102,17 @@
 
   --color-primary: var(--primary);
   --color-primary-hover: var(--primary-hover);
+  --color-primary-deep: var(--primary-deep);
   --color-primary-soft: var(--primary-soft);
   --color-primary-fg: var(--primary-fg);
 
   --color-accent: var(--accent);
   --color-accent-soft: var(--accent-soft);
+
+  --color-xp: var(--xp);
+  --color-xp-soft: var(--xp-soft);
+  --color-freq: var(--freq);
+  --color-freq-soft: var(--freq-soft);
 
   --color-ok: var(--ok);
   --color-ok-soft: var(--ok-soft);
@@ -88,6 +120,9 @@
   --color-warn-soft: var(--warn-soft);
   --color-bad: var(--bad);
   --color-bad-soft: var(--bad-soft);
+
+  --radius-card: var(--r-card);
+  --radius-control: var(--r-control);
 }
 
 @layer base {
@@ -95,25 +130,35 @@
     border-color: var(--border);
   }
   html {
-    color-scheme: light;
-  }
-  html.dark {
     color-scheme: dark;
+  }
+  html.light {
+    color-scheme: light;
   }
   body {
     background-color: var(--bg);
     color: var(--text);
+    /* números são o conteúdo principal deste app: algarismos tabulares
+       para as métricas não dançarem ao atualizar */
+    font-feature-settings: "tnum" 1, "cv05" 1;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
   ::selection {
-    background: color-mix(in srgb, var(--primary) 25%, transparent);
+    background: color-mix(in srgb, var(--primary) 30%, transparent);
   }
   :focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
     border-radius: 4px;
   }
+}
+
+/* Métrica: todo número de KPI / XP / contador usa isto para não "dançar". */
+.metric {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -0.01em;
 }
 
 /* Scrollbar */
@@ -143,6 +188,8 @@
   }
 }
 
+/* Mantido para transições que respondem a ação do usuário (drawer, etc.).
+   NÃO aplicar em carga de página. */
 @keyframes ea-fade-up {
   from {
     opacity: 0;
@@ -155,4 +202,13 @@
 }
 .animate-fade-up {
   animation: ea-fade-up 0.35s ease both;
+}
+
+/* Folha de redação: sempre preto sobre branco para impressão. */
+@media print {
+  html,
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
 }

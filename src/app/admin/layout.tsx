@@ -12,7 +12,7 @@ const TABS = [
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-4xl">
       <div className="mb-6">
         <p className="text-xs font-bold uppercase tracking-wider text-faint">Painel</p>
         <h1 className="text-2xl font-extrabold tracking-tight text-text sm:text-3xl">

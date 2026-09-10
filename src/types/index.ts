@@ -112,9 +112,11 @@ export interface Settings {
   name: string;
   dailyGoal: number; // questões por dia
   enemDates: string[]; // ISO date (yyyy-mm-dd)
-  theme: "light" | "dark" | "system";
+  theme: "light" | "dark" | "system"; // app é dark-first: padrão "dark"
   onboarded: boolean;
   diagnosticDone?: boolean;
+  sidebarCollapsed?: boolean; // sidebar do shell recolhida (modo só-ícone)
+  openedCorrecoes?: string[]; // ids de redação cuja correção ela já abriu (p/ o sino)
 }
 
 export interface AppData {

@@ -7,8 +7,10 @@ import {
   addRedacao,
   deleteRedacao,
   updateRedacao,
+  updateSettings,
   useHydrated,
   useRedacoes,
+  useSettings,
 } from "@/lib/store";
 import { COMPETENCIAS, TEMAS_PROVAVEIS } from "@/lib/redacao";
 import type { RedacaoCorrecao } from "@/types";
@@ -44,6 +46,14 @@ export function RedacaoApp() {
   const params = useSearchParams();
   const hydrated = useHydrated();
   const redacoes = useRedacoes();
+  const [settings] = useSettings();
+
+  const markCorrecaoOpened = (id: string) => {
+    const opened = settings.openedCorrecoes ?? [];
+    if (!opened.includes(id)) {
+      updateSettings({ openedCorrecoes: [...opened, id] });
+    }
+  };
 
   const [tema, setTema] = useState(params.get("tema") || "");
   const [text, setText] = useState("");
@@ -96,7 +106,7 @@ export function RedacaoApp() {
   };
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5 px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-3xl space-y-5">
       <PageHeader
         title="Redação ✍️"
         subtitle="Escreva, receba a correção pelas 5 competências e treine à mão."
@@ -182,7 +192,11 @@ export function RedacaoApp() {
             return (
               <Card key={r.id} className="p-4">
                 <button
-                  onClick={() => setOpenId(open ? null : r.id)}
+                  onClick={() => {
+                    const next = open ? null : r.id;
+                    setOpenId(next);
+                    if (next && r.correcao) markCorrecaoOpened(r.id);
+                  }}
                   className="flex w-full items-center gap-3 text-left"
                 >
                   <div className="min-w-0 flex-1">

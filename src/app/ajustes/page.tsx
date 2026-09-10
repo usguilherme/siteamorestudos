@@ -63,7 +63,7 @@ export default function AjustesPage() {
   const dates = settings.enemDates.length ? settings.enemDates : DEFAULT_ENEM_DATES;
 
   return (
-    <div className="mx-auto max-w-2xl space-y-5 px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-2xl space-y-5">
       <PageHeader title="Ajustes ⚙️" subtitle="Personalize o app do seu jeito." />
 
       {flash ? (

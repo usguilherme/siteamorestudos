@@ -12,7 +12,7 @@ export function Card({
   return (
     <div
       className={cn(
-        "rounded-2xl border border-border bg-surface shadow-[var(--shadow)]",
+        "rounded-card border border-border bg-surface shadow-[var(--shadow)]",
         className,
       )}
       {...rest}
@@ -28,16 +28,16 @@ type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "accent";
 type ButtonSize = "sm" | "md" | "lg";
 
 const buttonBase =
-  "inline-flex items-center justify-center gap-2 rounded-xl font-semibold transition-all duration-200 disabled:opacity-45 disabled:pointer-events-none active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2";
+  "inline-flex items-center justify-center gap-2 rounded-control font-bold transition-colors duration-150 disabled:opacity-45 disabled:pointer-events-none active:scale-[0.985] focus-visible:outline-2 focus-visible:outline-offset-2";
 
 const buttonVariants: Record<ButtonVariant, string> = {
-  primary:
-    "bg-primary text-primary-fg hover:bg-primary-hover shadow-[0_6px_20px_-8px_var(--primary)]",
-  accent: "bg-accent text-white hover:opacity-90 shadow-[0_6px_20px_-8px_var(--accent)]",
+  primary: "bg-primary text-primary-fg hover:bg-primary-hover",
+  accent: "bg-accent text-white hover:opacity-90",
   secondary:
-    "border border-border-strong bg-surface text-text hover:bg-surface-2",
+    "border border-border-strong bg-surface-2 text-text hover:border-primary/50",
   ghost: "text-muted hover:bg-surface-2 hover:text-text",
-  danger: "border border-[var(--bad)]/30 bg-[var(--bad-soft)] text-bad hover:bg-[var(--bad)]/15",
+  danger:
+    "border border-[var(--bad)]/30 bg-[var(--bad-soft)] text-bad hover:bg-[var(--bad)]/20",
 };
 
 const buttonSizes: Record<ButtonSize, string> = {
@@ -81,7 +81,7 @@ export function ButtonLink({
 
 /* -------------------------------- Badge ------------------------------- */
 
-type Tone = "neutral" | "primary" | "ok" | "warn" | "bad" | "accent";
+type Tone = "neutral" | "primary" | "ok" | "warn" | "bad" | "accent" | "xp" | "freq";
 
 const badgeTones: Record<Tone, string> = {
   neutral: "bg-surface-2 text-muted",
@@ -90,6 +90,8 @@ const badgeTones: Record<Tone, string> = {
   warn: "bg-[var(--warn-soft)] text-warn",
   bad: "bg-[var(--bad-soft)] text-bad",
   accent: "bg-accent-soft text-accent",
+  xp: "bg-xp-soft text-xp",
+  freq: "bg-freq-soft text-freq",
 };
 
 export function Badge({
@@ -104,7 +106,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold",
+        "inline-flex items-center gap-1 rounded-control px-2.5 py-1 text-xs font-bold",
         badgeTones[tone],
         className,
       )}
@@ -116,6 +118,8 @@ export function Badge({
 
 /* ------------------------------ StatCard ------------------------------ */
 
+type StatTone = "neutral" | "primary" | "ok" | "warn" | "bad" | "accent" | "xp" | "freq";
+
 export function StatCard({
   label,
   value,
@@ -126,26 +130,26 @@ export function StatCard({
   label: string;
   value: ReactNode;
   hint?: ReactNode;
-  tone?: Tone;
+  tone?: StatTone;
   className?: string;
 }) {
-  const valueColor: Record<Tone, string> = {
+  const valueColor: Record<StatTone, string> = {
     neutral: "text-text",
     primary: "text-primary",
     ok: "text-ok",
     warn: "text-warn",
     bad: "text-bad",
     accent: "text-accent",
+    xp: "text-xp",
+    freq: "text-freq",
   };
   return (
     <Card className={cn("p-5", className)}>
-      <p className="text-[11px] font-bold uppercase tracking-wider text-faint">
-        {label}
-      </p>
-      <p className={cn("mt-2 text-3xl font-extrabold tracking-tight", valueColor[tone])}>
+      <p className="text-xs font-semibold text-muted">{label}</p>
+      <p className={cn("metric mt-2 text-3xl font-bold", valueColor[tone])}>
         {value}
       </p>
-      {hint ? <p className="mt-1 text-xs text-muted">{hint}</p> : null}
+      {hint ? <p className="mt-1 text-xs text-faint">{hint}</p> : null}
     </Card>
   );
 }
@@ -158,7 +162,7 @@ export function ProgressBar({
   className,
 }: {
   value: number;
-  tone?: "primary" | "ok" | "warn" | "bad" | "accent";
+  tone?: "primary" | "ok" | "warn" | "bad" | "accent" | "xp" | "freq";
   className?: string;
 }) {
   const colors = {
@@ -167,6 +171,8 @@ export function ProgressBar({
     warn: "bg-warn",
     bad: "bg-bad",
     accent: "bg-accent",
+    xp: "bg-xp",
+    freq: "bg-freq",
   };
   return (
     <div
@@ -197,7 +203,7 @@ export function PageHeader({
   return (
     <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <h1 className="text-2xl font-extrabold tracking-tight text-text sm:text-3xl">
+        <h1 className="text-2xl font-bold tracking-tight text-text sm:text-3xl">
           {title}
         </h1>
         {subtitle ? (
@@ -224,7 +230,7 @@ export function EmptyState({
 }) {
   return (
     <Card className="border-dashed p-10 text-center sm:p-14">
-      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-2 text-2xl">
+      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-control bg-surface-2 text-2xl">
         {icon}
       </div>
       <p className="text-base font-bold text-text sm:text-lg">{title}</p>
@@ -257,6 +263,6 @@ export function Field({
 }
 
 export const inputClass =
-  "w-full rounded-xl border border-border-strong bg-surface px-3 py-2.5 text-sm text-text shadow-sm outline-none transition placeholder:text-faint focus:border-primary";
+  "w-full rounded-control border border-border-strong bg-surface-2 px-3 py-2.5 text-sm text-text outline-none transition-colors placeholder:text-faint focus:border-primary";
 
 export const selectClass = inputClass + " cursor-pointer";

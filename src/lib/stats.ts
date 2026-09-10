@@ -385,3 +385,179 @@ export function usePriorities(): Priority[] {
   const { attempts } = useAppData();
   return useMemo(() => computePriorities(attempts), [attempts]);
 }
+
+/* ------------------------------------------------------------------ */
+/* Camada de progresso: XP e nível.                                    */
+/*                                                                    */
+/* Função PURA derivada de `attempts` — nunca um campo persistido,     */
+/* nunca cálculo dentro de componente. Assim continua consistente      */
+/* mesmo se ela estudar em outro dispositivo e os blocos              */
+/* sincronizarem fora de ordem: o histórico é a fonte da verdade.      */
+/* Frequência (dias estudados na semana) NUNCA pune — ver plano.ts.    */
+/* ------------------------------------------------------------------ */
+
+const XP_PER_ANSWER = 6; // por questão respondida
+const XP_CORRECT_BONUS = 10; // bônus de acerto
+const XP_HARD_BONUS = 6; // bônus por questão marcada como difícil
+
+// limiares crescentes; o índice i corresponde ao nível i+1
+const LEVEL_THRESHOLDS = [
+  0, 120, 320, 640, 1100, 1750, 2600, 3700, 5100, 6800, 8900, 11500,
+];
+// nomes discretos, sem pressão
+const LEVEL_NAMES = [
+  "Começando",
+  "Aquecendo",
+  "Pegando o ritmo",
+  "Constante",
+  "Afiada",
+  "Focada",
+  "No embalo",
+  "Imparável",
+  "Fera do ENEM",
+  "Nível aprovação",
+  "Modo TRI",
+  "Lenda",
+];
+
+export interface Progress {
+  xp: number;
+  level: number; // 1-based
+  levelName: string;
+  nextLevelName: string | null;
+  xpIntoLevel: number; // XP acumulado dentro do nível atual
+  xpForLevel: number; // tamanho do nível atual (0 no último)
+  xpToNext: number; // quanto falta pro próximo (0 no último)
+  pct: number; // 0..100 dentro do nível atual
+}
+
+export function xpForAttempt(a: Attempt): number {
+  let xp = XP_PER_ANSWER;
+  if (a.isCorrect) xp += XP_CORRECT_BONUS;
+  if (a.difficulty === "dificil") xp += XP_HARD_BONUS;
+  return xp;
+}
+
+export function computeProgress(attempts: Attempt[]): Progress {
+  const xp = attempts.reduce((s, a) => s + xpForAttempt(a), 0);
+
+  let level = 1;
+  for (let i = 0; i < LEVEL_THRESHOLDS.length; i++) {
+    if (xp >= LEVEL_THRESHOLDS[i]) level = i + 1;
+  }
+  const isLast = level >= LEVEL_THRESHOLDS.length;
+  const base = LEVEL_THRESHOLDS[level - 1];
+  const next = isLast ? base : LEVEL_THRESHOLDS[level];
+  const xpForLevel = isLast ? 0 : next - base;
+  const xpIntoLevel = xp - base;
+  const xpToNext = isLast ? 0 : next - xp;
+  const pct = isLast || xpForLevel === 0
+    ? 100
+    : Math.max(0, Math.min(100, Math.round((xpIntoLevel / xpForLevel) * 100)));
+
+  return {
+    xp,
+    level,
+    levelName: LEVEL_NAMES[level - 1] ?? LEVEL_NAMES[LEVEL_NAMES.length - 1],
+    nextLevelName: isLast ? null : LEVEL_NAMES[level] ?? null,
+    xpIntoLevel,
+    xpForLevel,
+    xpToNext,
+    pct,
+  };
+}
+
+export function useProgress(): Progress {
+  const { attempts } = useAppData();
+  return useMemo(() => computeProgress(attempts), [attempts]);
+}
+
+/* ------------------------------------------------------------------ */
+/* Janela de 7 dias — base dos KPIs da Home e do "vs. sua média".      */
+/* Tudo com estado vazio honesto: sem dado → null, nunca número falso. */
+/* ------------------------------------------------------------------ */
+
+export interface WeeklyWindow {
+  answered: number; // tentativas nos últimos 7 dias
+  correct: number;
+  accuracy: number | null; // null se answered === 0
+  studySeconds: number; // soma de timeSpent na janela
+  daysStudied: number; // dias distintos com atividade na janela
+  prevAvgAccuracy: number | null; // acerto médio das ~4 semanas anteriores
+  accuracyDelta: number | null; // accuracy - prevAvgAccuracy (pontos %)
+  bars: { key: string; letter: string; count: number; isToday: boolean }[];
+  avgPerDay: number; // média de questões/dia na janela (linha tracejada)
+}
+
+export function computeWeeklyWindow(attempts: Attempt[]): WeeklyWindow {
+  const now = new Date();
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+  const dayMs = 86_400_000;
+  const todayK = dateKey(now);
+
+  const bars = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(startOfToday.getTime() - (6 - i) * dayMs);
+    const key = dateKey(d);
+    return {
+      key,
+      letter: d
+        .toLocaleDateString("pt-BR", { weekday: "short" })
+        .charAt(0)
+        .toUpperCase(),
+      count: 0,
+      isToday: key === todayK,
+    };
+  });
+  const barIndex = new Map(bars.map((b, i) => [b.key, i] as const));
+
+  const windowStart = startOfToday.getTime() - 6 * dayMs;
+  let answered = 0;
+  let correct = 0;
+  let studySeconds = 0;
+  const daysSet = new Set<string>();
+
+  const prevStart = startOfToday.getTime() - 34 * dayMs;
+  let pTotal = 0;
+  let pCorrect = 0;
+
+  for (const a of attempts) {
+    const t = new Date(a.createdAt).getTime();
+    if (t >= windowStart) {
+      answered++;
+      if (a.isCorrect) correct++;
+      studySeconds += a.timeSpent || 0;
+      const k = dateKey(a.createdAt);
+      daysSet.add(k);
+      const idx = barIndex.get(k);
+      if (idx !== undefined) bars[idx].count++;
+    } else if (t >= prevStart) {
+      pTotal++;
+      if (a.isCorrect) pCorrect++;
+    }
+  }
+
+  const accuracy = answered ? Math.round((correct / answered) * 100) : null;
+  const prevAvgAccuracy = pTotal ? Math.round((pCorrect / pTotal) * 100) : null;
+  const accuracyDelta =
+    accuracy !== null && prevAvgAccuracy !== null
+      ? accuracy - prevAvgAccuracy
+      : null;
+
+  return {
+    answered,
+    correct,
+    accuracy,
+    studySeconds,
+    daysStudied: daysSet.size,
+    prevAvgAccuracy,
+    accuracyDelta,
+    bars,
+    avgPerDay: answered ? Math.round((answered / 7) * 10) / 10 : 0,
+  };
+}
+
+export function useWeeklyWindow(): WeeklyWindow {
+  const { attempts } = useAppData();
+  return useMemo(() => computeWeeklyWindow(attempts), [attempts]);
+}

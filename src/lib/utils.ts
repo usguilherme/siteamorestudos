@@ -13,6 +13,23 @@ export function formatTime(totalSeconds: number | null | undefined): string {
   return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
 }
 
+/** Número compacto para pills/KPIs: 1234 -> "1.2k". */
+export function formatCompact(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 10000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
+  return Math.round(n / 1000) + "k";
+}
+
+/** Duração legível a partir de segundos: "2h28", "45min", "12s". */
+export function formatDuration(totalSeconds: number): string {
+  const s = Math.max(0, Math.round(totalSeconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h > 0) return `${h}h${m.toString().padStart(2, "0")}`;
+  if (m > 0) return `${m}min`;
+  return `${s}s`;
+}
+
 export function getUniqueQuestionsCount(attempts: Attempt[]): number {
   const uniqueIds = new Set(attempts.map(a => a.questionId));
   return uniqueIds.size;

@@ -27,7 +27,7 @@ export default function DesempenhoPage() {
 
   if (hydrated && stats.totalAttempts === 0) {
     return (
-      <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+      <div className="mx-auto max-w-4xl">
         <PageHeader title="Desempenho 📊" subtitle="Sua evolução, ponto a ponto." />
         <EmptyState
           icon="📈"
@@ -47,7 +47,7 @@ export default function DesempenhoPage() {
   const weakest = stats.byTopic.filter((t) => t.total >= 3)[0];
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-4xl space-y-6">
       <PageHeader
         title="Desempenho 📊"
         subtitle="Sua evolução, ponto a ponto."

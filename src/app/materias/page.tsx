@@ -45,7 +45,7 @@ export default function MateriasPage() {
 
   if (hydrated && questions.length === 0) {
     return (
-      <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+      <div className="mx-auto max-w-4xl">
         <PageHeader title="Matérias 📚" subtitle="Seu banco de questões por área." />
         <EmptyState
           icon="📄"
@@ -58,7 +58,7 @@ export default function MateriasPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-5 px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-4xl space-y-5">
       <PageHeader
         title="Matérias 📚"
         subtitle={`${questions.length} questões no banco`}

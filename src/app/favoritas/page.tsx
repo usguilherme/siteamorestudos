@@ -31,7 +31,7 @@ export default function FavoritasPage() {
 
   if (hydrated && favs.length === 0) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+      <div className="mx-auto max-w-3xl">
         <PageHeader title="Favoritas ⭐" subtitle="Seu caderno de questões marcadas." />
         <EmptyState
           icon="⭐"
@@ -44,7 +44,7 @@ export default function FavoritasPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5 px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-3xl space-y-5">
       <PageHeader
         title="Favoritas ⭐"
         subtitle={`${favs.length} questão(ões) no caderno`}
