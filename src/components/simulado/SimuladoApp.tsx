@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
+  effectiveDifficulty,
   markReviewed,
   recordAttempt,
   saveSession,
@@ -22,6 +23,7 @@ import {
   type SimuladoMode,
 } from "@/types";
 import { computeScoreEstimate } from "@/lib/stats";
+import { DifficultyRater, DIFF_TONE } from "@/components/DifficultyRater";
 import { messages } from "@/lib/messages";
 import { formatTime } from "@/lib/utils";
 import { shuffle } from "@/lib/shuffle";
@@ -59,7 +61,7 @@ function usable(q: Question) {
 
 export function SimuladoApp() {
   const params = useSearchParams();
-  const { questions, attempts, favorites } = useAppData();
+  const { questions, attempts, favorites, difficultyRatings } = useAppData();
 
   const favSet = useMemo(() => new Set(favorites), [favorites]);
 
@@ -127,14 +129,15 @@ export function SimuladoApp() {
     if (area !== "TODAS") list = list.filter((q) => q.subject === area);
     if (topic !== "TODOS") list = list.filter((q) => q.topic === topic);
     if (yearFilter) list = list.filter((q) => String(q.year) === yearFilter);
-    if (diffFilter) list = list.filter((q) => q.difficulty === diffFilter);
+    if (diffFilter)
+      list = list.filter((q) => effectiveDifficulty(q, difficultyRatings) === diffFilter);
     if (source === "erradas") list = list.filter((q) => wrongIds.has(q.id));
     if (source === "nao-vistas") list = list.filter((q) => !seenIds.has(q.id));
     if (source === "favoritas") list = list.filter((q) => favSet.has(q.id));
     if (shuffleQ) list = shuffle(list);
     else list = [...list].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     return list.slice(0, Math.max(1, count));
-  }, [questions, mode, area, topic, yearFilter, diffFilter, source, shuffleQ, count, wrongIds, seenIds, favSet]);
+  }, [questions, mode, area, topic, yearFilter, diffFilter, source, shuffleQ, count, wrongIds, seenIds, favSet, difficultyRatings]);
 
   const preview = useMemo(() => buildPool().length, [buildPool]);
   const totalUsable = useMemo(
@@ -230,7 +233,7 @@ export function SimuladoApp() {
         userAnswer: letter,
         correctAnswer: q.correctOption,
         reason: reasons[q.id] ?? null,
-        difficulty: q.difficulty,
+        difficulty: effectiveDifficulty(q, difficultyRatings),
         timeSpent: elapsed[q.id] ?? 0,
         mode: runMode,
       });
@@ -242,7 +245,7 @@ export function SimuladoApp() {
       .map((q) => ({
         subject: q.subject,
         isCorrect: answers[q.id] === q.correctOption,
-        difficulty: q.difficulty,
+        difficulty: effectiveDifficulty(q, difficultyRatings),
       }));
     const est = computeScoreEstimate(sessionAttempts as never);
 
@@ -258,7 +261,7 @@ export function SimuladoApp() {
     });
     setPhase("done");
     window.scrollTo({ top: 0 });
-  }, [pool, answers, reasons, elapsed, runMode, area, topic, source, totalElapsed]);
+  }, [pool, answers, reasons, elapsed, runMode, area, topic, source, totalElapsed, difficultyRatings]);
 
   // Prova real: acabou o tempo → encerra automaticamente.
   useEffect(() => {
@@ -436,7 +439,7 @@ export function SimuladoApp() {
                 </Field>
               ) : null}
 
-              <Field label="Dificuldade">
+              <Field label="Dificuldade (como você marcou)">
                 <select
                   className={selectClass}
                   value={diffFilter}
@@ -588,10 +591,15 @@ export function SimuladoApp() {
             const ok = picked === q.correctOption;
             return (
               <Card key={q.id} className="p-4">
-                <div className="mb-2 flex items-center gap-2">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
                   <Badge tone={picked === undefined ? "neutral" : ok ? "ok" : "bad"}>
                     {picked === undefined ? "em branco" : ok ? "✅ acertou" : "❌ errou"}
                   </Badge>
+                  {difficultyRatings[q.id] ? (
+                    <Badge tone={DIFF_TONE[difficultyRatings[q.id]]}>
+                      você: {DIFFICULTY_LABEL[difficultyRatings[q.id]]}
+                    </Badge>
+                  ) : null}
                   <span className="text-xs text-muted">
                     {i + 1}. {areaShort(q.subject)} · {q.topic}
                   </span>
@@ -623,6 +631,9 @@ export function SimuladoApp() {
                     💡 {q.explanation}
                   </p>
                 ) : null}
+                <div className="mt-3 border-t border-border pt-3">
+                  <DifficultyRater questionId={q.id} value={difficultyRatings[q.id]} />
+                </div>
               </Card>
             );
           })}
@@ -636,6 +647,8 @@ export function SimuladoApp() {
   const progress = ((idx + (answered ? 1 : 0)) / pool.length) * 100;
   const isFav = favSet.has(current.id);
   const isWrong = runMode === "treino" && answered && answers[current.id] !== current.correctOption;
+  const myRating = difficultyRatings[current.id];
+  const effDiff = effectiveDifficulty(current, difficultyRatings);
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-6 sm:px-6">
@@ -668,17 +681,10 @@ export function SimuladoApp() {
         <Badge tone="primary">{areaShort(current.subject)}</Badge>
         <Badge>{current.topic}</Badge>
         {current.year ? <Badge tone="neutral">{current.year}</Badge> : null}
-        {current.difficulty && runMode === "treino" && answered ? (
-          <Badge
-            tone={
-              current.difficulty === "facil"
-                ? "ok"
-                : current.difficulty === "dificil"
-                  ? "bad"
-                  : "warn"
-            }
-          >
-            {DIFFICULTY_LABEL[current.difficulty]}
+        {effDiff && runMode === "treino" ? (
+          <Badge tone={DIFF_TONE[effDiff]}>
+            {myRating ? "você: " : ""}
+            {DIFFICULTY_LABEL[effDiff]}
           </Badge>
         ) : null}
         <button
@@ -812,6 +818,10 @@ export function SimuladoApp() {
             ) : null}
           </div>
         ) : null}
+
+        <div className="border-t border-border pt-4">
+          <DifficultyRater questionId={current.id} value={myRating} />
+        </div>
       </Card>
 
       {/* navegação */}

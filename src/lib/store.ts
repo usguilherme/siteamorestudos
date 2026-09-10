@@ -21,6 +21,7 @@ import { useMemo, useSyncExternalStore } from "react";
 import { onValue, ref, set as rtdbSet } from "firebase/database";
 import { rtdb } from "@/lib/firebase";
 import { DEFAULT_ENEM_DATES, areaName } from "@/lib/enem";
+import { DIFFICULTIES } from "@/types";
 import type {
   AppData,
   Attempt,
@@ -69,6 +70,7 @@ function defaultData(): AppData {
     redacoes: [],
     favorites: [],
     reviewedAt: {},
+    difficultyRatings: {},
     settings: { ...DEFAULT_SETTINGS },
   };
 }
@@ -316,6 +318,25 @@ function normRedacao(v: unknown): Redacao {
   };
 }
 
+/** questionId -> nível, descartando valores fora de facil|media|dificil. */
+function coerceRatings(input: unknown): Record<string, Difficulty> {
+  const out: Record<string, Difficulty> = {};
+  if (input && typeof input === "object") {
+    for (const [id, v] of Object.entries(input as Record<string, unknown>)) {
+      if (DIFFICULTIES.includes(v as Difficulty)) out[id] = v as Difficulty;
+    }
+  }
+  return out;
+}
+
+/** Nível efetivo de uma questão: o que a aluna marcou vence o do catálogo. */
+export function effectiveDifficulty(
+  q: Pick<Question, "id" | "difficulty">,
+  ratings: Record<string, Difficulty>,
+): Difficulty | undefined {
+  return ratings[q.id] ?? q.difficulty;
+}
+
 /** Parte "usuário" do AppData (tudo menos as questões). */
 function coerceUser(input: unknown): Omit<AppData, "questions"> {
   const parsed = asObj(input);
@@ -338,6 +359,7 @@ function coerceUser(input: unknown): Omit<AppData, "questions"> {
       parsed.reviewedAt && typeof parsed.reviewedAt === "object"
         ? (parsed.reviewedAt as Record<string, string>)
         : base.reviewedAt,
+    difficultyRatings: coerceRatings(parsed.difficultyRatings),
     settings: { ...base.settings, ...(asObj(parsed.settings) as Partial<Settings>) },
   };
 }
@@ -635,6 +657,7 @@ function clone(d: AppData): AppData {
     redacoes: [...d.redacoes],
     favorites: [...d.favorites],
     reviewedAt: { ...d.reviewedAt },
+    difficultyRatings: { ...d.difficultyRatings },
     settings: { ...d.settings },
   };
 }
@@ -756,6 +779,16 @@ export function markReviewed(questionId: string) {
   });
 }
 
+/** Registra (ou limpa, com `null`) o nível que a aluna sentiu na questão.
+ *  Vale para o catálogo (somente leitura) e para as questões dela — fica no
+ *  bloco `user`, não na questão. */
+export function rateDifficulty(questionId: string, level: Difficulty | null) {
+  mutateUser((d) => {
+    if (level === null) delete d.difficultyRatings[questionId];
+    else d.difficultyRatings[questionId] = level;
+  });
+}
+
 export function updateSettings(patch: Partial<Settings>) {
   mutateUser((d) => {
     d.settings = { ...d.settings, ...patch };
@@ -818,6 +851,7 @@ export function importData(incoming: unknown, mode: "merge" | "replace" = "merge
       d.redacoes = user.redacoes;
       d.favorites = user.favorites;
       d.reviewedAt = user.reviewedAt;
+      d.difficultyRatings = user.difficultyRatings;
       d.settings = user.settings;
       return;
     }
@@ -829,6 +863,7 @@ export function importData(incoming: unknown, mode: "merge" | "replace" = "merge
     for (const r of user.redacoes) if (!rIds.has(r.id)) d.redacoes.push(r);
     d.favorites = Array.from(new Set([...d.favorites, ...user.favorites]));
     d.reviewedAt = { ...d.reviewedAt, ...user.reviewedAt };
+    d.difficultyRatings = { ...d.difficultyRatings, ...user.difficultyRatings };
   };
 
   if (questions.length) mutateQuestions(applyQ);
@@ -845,6 +880,7 @@ export function resetData() {
     d.redacoes = [];
     d.favorites = [];
     d.reviewedAt = {};
+    d.difficultyRatings = {};
     d.settings = { ...DEFAULT_SETTINGS, name: keepName, onboarded: true };
   });
 }
@@ -955,6 +991,14 @@ export function useFavorites(): [Set<string>, (id: string) => void] {
 
 export function useQuestions(): Question[] {
   return useAppData().questions;
+}
+
+/** [ratings, rate] — ratings é questionId -> nível marcado pela aluna. */
+export function useDifficultyRatings(): [
+  Record<string, Difficulty>,
+  (questionId: string, level: Difficulty | null) => void,
+] {
+  return [useAppData().difficultyRatings, rateDifficulty];
 }
 
 export function useAttempts(): Attempt[] {

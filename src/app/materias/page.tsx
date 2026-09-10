@@ -1,12 +1,20 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useAppData, useCatalogState, useFavorites, useHydrated } from "@/lib/store";
+import {
+  effectiveDifficulty,
+  useAppData,
+  useCatalogState,
+  useDifficultyRatings,
+  useFavorites,
+  useHydrated,
+} from "@/lib/store";
 import { useStats } from "@/lib/stats";
 import { ENEM_AREAS, areaId } from "@/lib/enem";
 import { DIFFICULTIES, DIFFICULTY_LABEL, type Difficulty } from "@/types";
 import { cn } from "@/lib/cn";
 import { Badge, ButtonLink, Card, EmptyState, PageHeader } from "@/components/ui";
+import { DifficultyRater, DIFF_TONE } from "@/components/DifficultyRater";
 
 const NO_AREA = "sem-area";
 const NO_TOPIC = "Sem assunto classificado";
@@ -20,6 +28,7 @@ export default function MateriasPage() {
   const { questions, attempts } = useAppData();
   const stats = useStats();
   const [favSet] = useFavorites();
+  const [ratings] = useDifficultyRatings();
 
   const [search, setSearch] = useState("");
   const [year, setYear] = useState("");
@@ -63,12 +72,12 @@ export default function MateriasPage() {
   const base = useMemo(() => {
     return questions.filter((q) => {
       if (year && String(q.year) !== year) return false;
-      if (difficulty && q.difficulty !== difficulty) return false;
+      if (difficulty && effectiveDifficulty(q, ratings) !== difficulty) return false;
       if (onlyWrong && !wrongIds.has(q.id)) return false;
       if (onlyFav && !favSet.has(q.id)) return false;
       return true;
     });
-  }, [questions, year, difficulty, onlyWrong, onlyFav, wrongIds, favSet]);
+  }, [questions, year, difficulty, onlyWrong, onlyFav, wrongIds, favSet, ratings]);
 
   // agrupamento por área — TODA questão cai em exatamente um balde, então a
   // soma dos baldes é sempre igual a base.length (invariante).
@@ -472,6 +481,8 @@ function QuestionRow({
   open: boolean;
   onToggle: () => void;
 }) {
+  const [ratings] = useDifficultyRatings();
+  const rating = ratings[q.id];
   return (
     <div className="rounded-xl border border-border bg-surface">
       <button
@@ -485,22 +496,28 @@ function QuestionRow({
           ) : null}
           <span className={cn(!open && "line-clamp-2")}>{q.statement}</span>
         </span>
+        {rating ? (
+          <Badge tone={DIFF_TONE[rating]}>{DIFFICULTY_LABEL[rating]}</Badge>
+        ) : null}
       </button>
       {open ? (
-        <div className="space-y-1 px-3 pb-3 text-sm">
-          {q.options.map((o) => (
-            <div
-              key={o.letter}
-              className={cn(
-                "rounded-lg px-2 py-1",
-                o.letter === q.correctOption
-                  ? "bg-[var(--ok-soft)] font-semibold text-ok"
-                  : "text-muted",
-              )}
-            >
-              <span className="font-bold">{o.letter})</span> {o.text}
-            </div>
-          ))}
+        <div className="space-y-2 px-3 pb-3 text-sm">
+          <DifficultyRater questionId={q.id} value={rating} />
+          <div className="space-y-1">
+            {q.options.map((o) => (
+              <div
+                key={o.letter}
+                className={cn(
+                  "rounded-lg px-2 py-1",
+                  o.letter === q.correctOption
+                    ? "bg-[var(--ok-soft)] font-semibold text-ok"
+                    : "text-muted",
+                )}
+              >
+                <span className="font-bold">{o.letter})</span> {o.text}
+              </div>
+            ))}
+          </div>
           {q.explanation ? (
             <p className="mt-1 rounded-lg bg-surface-2 p-2 text-xs text-muted">
               💡 {q.explanation}

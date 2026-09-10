@@ -127,5 +127,6 @@ export interface AppData {
   redacoes: Redacao[];
   favorites: string[]; // questionId[]
   reviewedAt: Record<string, string>; // questionId -> ISO da última revisão
+  difficultyRatings: Record<string, Difficulty>; // questionId -> nível que a aluna sentia
   settings: Settings;
 }
